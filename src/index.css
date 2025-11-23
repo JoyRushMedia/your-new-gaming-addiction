@@ -1,0 +1,232 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================
+   VOID PALETTE — High-Velocity Cognitive Arcade
+   Design System Variables
+   ============================================ */
+
+:root {
+  /* === BACKGROUNDS === */
+  --void-black: #0a0a0f;
+  --void-deep: #050508;
+  --void-surface: #12121a;
+  --void-border: #1a1a28;
+
+  /* === NEON ACCENTS === */
+  --neon-cyan: #00f0ff;
+  --neon-magenta: #ff00ff;
+  --neon-amber: #ffb000;
+  --neon-violet: #a855f7;
+
+  /* === SEMANTIC COLORS === */
+  --chaos-red: #ff3366;
+  --order-green: #00ff88;
+  --text-primary: #e0e0ff;
+  --text-muted: #8888aa;
+
+  /* === GLOW PHYSICS === */
+  --glow-strength: 20px;
+  --glow-intense: 40px;
+  --glow-subtle: 8px;
+
+  /* === TIMING === */
+  --transition-snap: 0.08s;
+  --transition-smooth: 0.2s;
+  --transition-dramatic: 0.4s;
+
+  /* === EASING === */
+  --ease-out-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-snap: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ============================================
+   BASE STYLES
+   ============================================ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Exo 2', sans-serif;
+  background-color: var(--void-black);
+  color: var(--text-primary);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  width: 100vw;
+  height: 100vh;
+}
+
+/* ============================================
+   CHAMFERED CORNERS (Clip-Path System)
+   ============================================ */
+
+.chamfer-sm {
+  clip-path: polygon(
+    8px 0%,
+    100% 0%,
+    100% calc(100% - 8px),
+    calc(100% - 8px) 100%,
+    0% 100%,
+    0% 8px
+  );
+}
+
+.chamfer-lg {
+  clip-path: polygon(
+    16px 0%,
+    100% 0%,
+    100% calc(100% - 16px),
+    calc(100% - 16px) 100%,
+    0% 100%,
+    0% 16px
+  );
+}
+
+.chamfer-tech {
+  clip-path: polygon(
+    0% 0%,
+    calc(100% - 24px) 0%,
+    100% 24px,
+    100% 100%,
+    12px 100%,
+    0% calc(100% - 12px)
+  );
+}
+
+/* ============================================
+   SCANLINE OVERLAY
+   ============================================ */
+
+.scanlines {
+  position: relative;
+  overflow: hidden;
+}
+
+.scanlines::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1000;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0) 0px,
+    rgba(0, 0, 0, 0) 2px,
+    rgba(0, 240, 255, 0.03) 2px,
+    rgba(0, 240, 255, 0.03) 4px
+  );
+  animation: scanline-drift 8s linear infinite;
+}
+
+/* ============================================
+   DOUBLE BORDER SYSTEM
+   ============================================ */
+
+.border-tech {
+  position: relative;
+  border: 2px solid var(--neon-cyan);
+  box-shadow:
+    inset 0 0 var(--glow-subtle) var(--neon-cyan),
+    0 0 var(--glow-subtle) var(--neon-cyan);
+}
+
+.border-tech::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  right: -4px;
+  bottom: -4px;
+  border: 1px solid var(--void-border);
+  clip-path: inherit;
+  pointer-events: none;
+}
+
+/* ============================================
+   TYPOGRAPHY RULES
+   ============================================ */
+
+.text-header {
+  font-family: 'Rajdhani', sans-serif;
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+}
+
+.text-score {
+  font-family: 'Rajdhani', sans-serif;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.text-impact {
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+/* ============================================
+   JUICE PHYSICS
+   ============================================ */
+
+.btn-primary {
+  background: var(--void-surface);
+  border: 2px solid var(--neon-cyan);
+  color: var(--text-primary);
+  box-shadow: 0 0 var(--glow-subtle) var(--neon-cyan);
+  transition:
+    transform var(--transition-snap) var(--ease-snap),
+    box-shadow var(--transition-snap),
+    background var(--transition-snap);
+  cursor: pointer;
+  user-select: none;
+}
+
+.btn-primary:hover {
+  transform: scale(1.05);
+  box-shadow: 0 0 var(--glow-intense) var(--neon-cyan);
+  background: var(--neon-cyan);
+  color: var(--void-black);
+}
+
+.btn-primary:active {
+  transform: scale(0.95);
+  box-shadow: 0 0 4px var(--neon-cyan);
+  background: var(--void-deep);
+  border-color: var(--neon-amber);
+  transition: none;
+}
+
+/* ============================================
+   UTILITY CLASSES
+   ============================================ */
+
+.glow-cyan {
+  box-shadow: 0 0 var(--glow-strength) var(--neon-cyan);
+}
+
+.glow-magenta {
+  box-shadow: 0 0 var(--glow-strength) var(--neon-magenta);
+}
+
+.glow-amber {
+  box-shadow: 0 0 var(--glow-strength) var(--neon-amber);
+}
+
+.glow-violet {
+  box-shadow: 0 0 var(--glow-strength) var(--neon-violet);
+}
