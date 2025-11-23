@@ -74,10 +74,8 @@ export default function Tile({ tile, onClear, isClearable }) {
 
     setIsClearing(true);
 
-    // Brief delay for visual feedback before removal
-    setTimeout(() => {
-      onClear(tile.id);
-    }, 100);
+    // OPTIMIZED: Immediate callback for flow, visual cleanup happens async
+    onClear(tile.id);
   };
 
   return (

@@ -17,7 +17,7 @@ export const GAME_CONFIG = {
 
   // Zeigarnik Effect (cite: 107, 110)
   MIN_ENTROPY_TILES: 2,          // Never allow full closure
-  ENTROPY_SPAWN_DELAY: 1500,     // ms before new chaos appears
+  ENTROPY_SPAWN_DELAY: 800,      // OPTIMIZED: 800ms for high-velocity flow
 
   // Entropy Mechanics (cite: 96, 99, 100)
   MAX_ENTROPY_LEVEL: 100,
@@ -117,6 +117,7 @@ export function calculateCompletionPercentage(clearedCount, targetCount) {
 /**
  * Generates new entropy tiles to prevent closure (cite: 107, 110)
  * NEVER allows the board to be fully clear - creates cognitive itch
+ * OPTIMIZED: Adaptive spawn rate based on player skill (flow maintenance)
  *
  * @param {number} currentTileCount - Current number of tiles on board
  * @param {number} gridSize - Size of the game grid
@@ -125,19 +126,24 @@ export function calculateCompletionPercentage(clearedCount, targetCount) {
 export function calculateEntropySpawn(currentTileCount, gridSize) {
   const maxTiles = gridSize * gridSize;
   const emptySlots = maxTiles - currentTileCount;
+  const fillPercentage = currentTileCount / maxTiles;
 
-  // If board is too empty, spawn more entropy
+  // If board is too empty, spawn more entropy (panic mode)
   if (currentTileCount < GAME_CONFIG.MIN_ENTROPY_TILES) {
     return Math.min(3, emptySlots); // Spawn 3 tiles
   }
 
-  // Normal spawn rate: 1-2 tiles to maintain pressure
-  if (emptySlots > 2) {
-    return Math.random() > 0.5 ? 2 : 1;
+  // OPTIMIZED: Adaptive spawn - fewer tiles when board is full (prevents deadlock)
+  if (fillPercentage < 0.3) {
+    // Board is <30% full - spawn 2-3 tiles to maintain pressure
+    return Math.min(Math.random() > 0.5 ? 3 : 2, emptySlots);
+  } else if (fillPercentage < 0.7) {
+    // Board is 30-70% full - normal spawn rate (1-2 tiles)
+    return Math.min(Math.random() > 0.5 ? 2 : 1, emptySlots);
+  } else {
+    // Board is >70% full - slow spawn to prevent overflow
+    return emptySlots > 3 ? 1 : 0;
   }
-
-  // If board is full, don't spawn
-  return 0;
 }
 
 /**

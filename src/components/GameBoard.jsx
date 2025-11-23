@@ -122,23 +122,26 @@ export default function GameBoard() {
     const clearedTile = tiles.find(t => t.id === tileId);
     const tileElement = document.querySelector(`[data-tile-id="${tileId}"]`);
 
+    // FIXED: Near-miss detection - check if this was the LAST clearable tile
+    // but there are still other tiles remaining (chaos persists)
+    const remainingClearableAfterThis = clearableTileIds.filter(id => id !== tileId);
+    const totalTilesAfterClear = tiles.length - 1;
+
+    // Near-miss = Just cleared last clearable tile, but board still has 15%+ entropy
+    const isLastClearable = remainingClearableAfterThis.length === 0;
+    const hasSignificantEntropy = totalTilesAfterClear >= (GRID_SIZE * GRID_SIZE) * 0.15;
+
+    if (isLastClearable && hasSignificantEntropy) {
+      setIsNearMiss(true);
+      setShake(true); // SHAKE on near-miss
+      setTimeout(() => {
+        setIsNearMiss(false);
+        setShake(false);
+      }, 800);
+    }
+
     setTiles(prev => {
       const newTiles = prev.filter(t => t.id !== tileId);
-
-      // Near-miss detection
-      const targetClears = Math.floor(prev.length * 0.3);
-      const actualClears = 1;
-      const completion = calculateCompletionPercentage(actualClears, targetClears);
-
-      if (detectNearMiss(completion)) {
-        setIsNearMiss(true);
-        setShake(true); // SHAKE on near-miss
-        setTimeout(() => {
-          setIsNearMiss(false);
-          setShake(false);
-        }, 800);
-      }
-
       return newTiles;
     });
 
