@@ -13,6 +13,7 @@ import {
   findMatchingGroup,
   GAME_CONFIG,
 } from '../lib/gameLogic';
+import { soundManager } from '../lib/sounds';
 
 /**
  * GameBoard Component (JUICE-INJECTED)
@@ -51,8 +52,17 @@ export default function GameBoard() {
     return saved ? parseInt(saved, 10) : 0;
   });
   const [comboTimeLeft, setComboTimeLeft] = useState(0);
+  const [soundEnabled, setSoundEnabled] = useState(() => {
+    const saved = localStorage.getItem('entropyReduction_soundEnabled');
+    return saved !== 'false'; // Default to true
+  });
+  const [showTutorial, setShowTutorial] = useState(() => {
+    const seen = localStorage.getItem('entropyReduction_tutorialSeen');
+    return !seen; // Show if not seen
+  });
   const gameBoardRef = useRef(null);
   const comboTimerRef = useRef(null);
+  const soundInitialized = useRef(false);
 
   // ============================================
   // COMBO TIMER
@@ -104,6 +114,40 @@ export default function GameBoard() {
   }, [score, highScore]);
 
   // ============================================
+  // SOUND MANAGEMENT
+  // ============================================
+
+  const initSound = useCallback(() => {
+    if (!soundInitialized.current) {
+      soundManager.init();
+      soundManager.setEnabled(soundEnabled);
+      soundInitialized.current = true;
+    }
+  }, [soundEnabled]);
+
+  const toggleSound = useCallback(() => {
+    const newEnabled = !soundEnabled;
+    setSoundEnabled(newEnabled);
+    soundManager.setEnabled(newEnabled);
+    localStorage.setItem('entropyReduction_soundEnabled', newEnabled.toString());
+  }, [soundEnabled]);
+
+  // Sync sound enabled state
+  useEffect(() => {
+    soundManager.setEnabled(soundEnabled);
+  }, [soundEnabled]);
+
+  // ============================================
+  // TUTORIAL
+  // ============================================
+
+  const dismissTutorial = useCallback(() => {
+    setShowTutorial(false);
+    localStorage.setItem('entropyReduction_tutorialSeen', 'true');
+    initSound();
+  }, [initSound]);
+
+  // ============================================
   // RESTART GAME
   // ============================================
 
@@ -146,6 +190,41 @@ export default function GameBoard() {
   const togglePause = useCallback(() => {
     setIsPaused(prev => !prev);
   }, []);
+
+  // ============================================
+  // KEYBOARD SHORTCUTS
+  // ============================================
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Don't trigger if user is typing in an input
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      // If tutorial is showing, any key dismisses it
+      if (showTutorial) {
+        e.preventDefault();
+        dismissTutorial();
+        return;
+      }
+
+      switch (e.code) {
+        case 'Space':
+        case 'Escape':
+          e.preventDefault();
+          togglePause();
+          break;
+        case 'KeyR':
+          e.preventDefault();
+          restartGame();
+          break;
+        default:
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [togglePause, restartGame, showTutorial, dismissTutorial]);
 
   // ============================================
   // INITIALIZATION
@@ -216,6 +295,9 @@ export default function GameBoard() {
   // ============================================
 
   const handleTileClear = useCallback((tileId) => {
+    // Initialize sound on first user interaction
+    initSound();
+
     const now = Date.now();
     const timeSinceLastClear = now - lastClearTime;
 
@@ -241,6 +323,7 @@ export default function GameBoard() {
       setIsNearMiss(true);
       setNearMissPercent(entropyPercentage);
       setShake(true);
+      soundManager.playNearMiss();
       setTimeout(() => {
         setIsNearMiss(false);
         setShake(false);
@@ -253,6 +336,11 @@ export default function GameBoard() {
     // Update combo
     const newCombo = updateCombo(combo, true, timeSinceLastClear);
     setCombo(newCombo);
+
+    // Play combo sound if combo increased
+    if (newCombo > 1) {
+      soundManager.playCombo(newCombo);
+    }
 
     // Calculate reward - bonus points for clearing more tiles!
     const tilesCleared = matchingTileIds.length;
@@ -267,6 +355,16 @@ export default function GameBoard() {
 
     setScore(prev => prev + reward.points);
     setLastClearTime(now);
+
+    // Play appropriate sound based on clear type
+    if (reward.isCritical) {
+      soundManager.playCritical();
+    } else if (tilesCleared >= 4) {
+      soundManager.playBigClear();
+    } else {
+      // Normal clear with pitch based on tiles cleared
+      soundManager.playClear(1 + (tilesCleared - 3) * 0.2);
+    }
 
     // Show clear message for big clears
     if (tilesCleared >= 4 && !reward.isCritical) {
@@ -307,7 +405,7 @@ export default function GameBoard() {
         setShake(false);
       }, 1000);
     }
-  }, [combo, lastClearTime, tiles]);
+  }, [combo, lastClearTime, tiles, initSound]);
 
   // ============================================
   // AUTO-CLEAR DETECTION
@@ -477,6 +575,24 @@ export default function GameBoard() {
             >
               RESTART
             </motion.button>
+            <motion.button
+              className={`
+                chamfer-sm p-4 border-2 font-rajdhani font-bold tracking-wider text-sm
+                ${soundEnabled
+                  ? 'bg-void-surface border-order text-order'
+                  : 'bg-void-surface border-void-border text-text-muted'
+                }
+              `}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => {
+                initSound();
+                toggleSound();
+              }}
+              title={soundEnabled ? 'Sound On' : 'Sound Off'}
+            >
+              {soundEnabled ? 'SOUND ON' : 'SOUND OFF'}
+            </motion.button>
           </div>
         </div>
 
@@ -584,6 +700,93 @@ export default function GameBoard() {
           )}
         </AnimatePresence>
 
+        {/* Tutorial Overlay */}
+        <AnimatePresence>
+          {showTutorial && (
+            <motion.div
+              className="fixed inset-0 bg-void-black/90 flex items-center justify-center z-[60]"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+              onClick={dismissTutorial}
+            >
+              <motion.div
+                className="chamfer-lg bg-void-surface border-2 border-neon-cyan p-8 max-w-lg mx-4"
+                style={{ boxShadow: '0 0 60px #00f0ff' }}
+                initial={{ scale: 0.8, y: 30 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.8, y: 30 }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h2
+                  className="text-impact text-3xl text-neon-cyan mb-6 text-center"
+                  style={{ textShadow: '0 0 20px #00f0ff' }}
+                >
+                  HOW TO PLAY
+                </h2>
+
+                <div className="space-y-4 text-text-primary font-exo">
+                  <div className="flex items-start gap-3">
+                    <div className="text-neon-cyan font-bold text-xl">1</div>
+                    <div>
+                      <div className="font-rajdhani font-bold text-neon-amber">MATCH 3+</div>
+                      <div className="text-sm text-text-muted">
+                        Click glowing tiles that form a line of 3 or more matching colors
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <div className="text-neon-cyan font-bold text-xl">2</div>
+                    <div>
+                      <div className="font-rajdhani font-bold text-neon-amber">BUILD COMBOS</div>
+                      <div className="text-sm text-text-muted">
+                        Clear tiles quickly (within 3 seconds) to multiply your score
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <div className="text-neon-cyan font-bold text-xl">3</div>
+                    <div>
+                      <div className="font-rajdhani font-bold text-neon-amber">FIGHT ENTROPY</div>
+                      <div className="text-sm text-text-muted">
+                        New tiles spawn constantly - keep clearing to stay ahead!
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <div className="text-neon-violet font-bold text-xl">★</div>
+                    <div>
+                      <div className="font-rajdhani font-bold text-neon-violet">CRITICAL CLEARS</div>
+                      <div className="text-sm text-text-muted">
+                        10% chance for 3.5x bonus points on any clear!
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-6 pt-4 border-t border-void-border text-center">
+                  <motion.button
+                    className="chamfer-sm bg-neon-cyan text-void-black px-8 py-3 font-rajdhani font-bold text-lg tracking-wider"
+                    style={{ boxShadow: '0 0 20px #00f0ff' }}
+                    whileHover={{ scale: 1.05, boxShadow: '0 0 40px #00f0ff' }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={dismissTutorial}
+                  >
+                    START PLAYING
+                  </motion.button>
+                  <div className="text-xs text-text-muted mt-3">
+                    Press any key or click anywhere to dismiss
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Game Board */}
         <div className="flex-1 flex items-center justify-center scanlines">
           <motion.div
@@ -646,8 +849,15 @@ export default function GameBoard() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5 }}
         >
-          <p className="tracking-moderate">
+          <p className="tracking-moderate mb-2">
             CLICK TILES TO CLEAR • MATCH 3+ TO REDUCE ENTROPY
+          </p>
+          <p className="text-xs opacity-60">
+            <span className="text-neon-cyan">[SPACE]</span> Pause
+            <span className="mx-2">•</span>
+            <span className="text-neon-cyan">[R]</span> Restart
+            <span className="mx-2">•</span>
+            <span className="text-neon-cyan">[ESC]</span> Pause
           </p>
         </motion.div>
       </motion.div>
