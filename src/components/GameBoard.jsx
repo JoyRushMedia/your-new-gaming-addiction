@@ -13,6 +13,7 @@ import {
   findMatchingGroup,
   GAME_CONFIG,
 } from '../lib/gameLogic';
+import { soundManager } from '../lib/sounds';
 
 /**
  * GameBoard Component (JUICE-INJECTED)
@@ -30,7 +31,7 @@ const SPRING_CONFIG = {
   damping: 20,
 };
 
-export default function GameBoard() {
+export default function GameBoard({ onHome, onHelp }) {
   // ============================================
   // STATE MANAGEMENT
   // ============================================
@@ -51,8 +52,13 @@ export default function GameBoard() {
     return saved ? parseInt(saved, 10) : 0;
   });
   const [comboTimeLeft, setComboTimeLeft] = useState(0);
+  const [soundEnabled, setSoundEnabled] = useState(() => {
+    const saved = localStorage.getItem('entropyReduction_soundEnabled');
+    return saved !== 'false'; // Default to true
+  });
   const gameBoardRef = useRef(null);
   const comboTimerRef = useRef(null);
+  const soundInitialized = useRef(false);
 
   // ============================================
   // COMBO TIMER
@@ -104,6 +110,30 @@ export default function GameBoard() {
   }, [score, highScore]);
 
   // ============================================
+  // SOUND MANAGEMENT
+  // ============================================
+
+  const initSound = useCallback(() => {
+    if (!soundInitialized.current) {
+      soundManager.init();
+      soundManager.setEnabled(soundEnabled);
+      soundInitialized.current = true;
+    }
+  }, [soundEnabled]);
+
+  const toggleSound = useCallback(() => {
+    const newEnabled = !soundEnabled;
+    setSoundEnabled(newEnabled);
+    soundManager.setEnabled(newEnabled);
+    localStorage.setItem('entropyReduction_soundEnabled', newEnabled.toString());
+  }, [soundEnabled]);
+
+  // Sync sound enabled state
+  useEffect(() => {
+    soundManager.setEnabled(soundEnabled);
+  }, [soundEnabled]);
+
+  // ============================================
   // RESTART GAME
   // ============================================
 
@@ -146,6 +176,38 @@ export default function GameBoard() {
   const togglePause = useCallback(() => {
     setIsPaused(prev => !prev);
   }, []);
+
+  // ============================================
+  // KEYBOARD SHORTCUTS
+  // ============================================
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Don't trigger if user is typing in an input
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      switch (e.code) {
+        case 'Space':
+        case 'Escape':
+          e.preventDefault();
+          togglePause();
+          break;
+        case 'KeyR':
+          e.preventDefault();
+          restartGame();
+          break;
+        case 'KeyH':
+          e.preventDefault();
+          if (onHelp) onHelp();
+          break;
+        default:
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [togglePause, restartGame, onHelp]);
 
   // ============================================
   // INITIALIZATION
@@ -216,6 +278,9 @@ export default function GameBoard() {
   // ============================================
 
   const handleTileClear = useCallback((tileId) => {
+    // Initialize sound on first user interaction
+    initSound();
+
     const now = Date.now();
     const timeSinceLastClear = now - lastClearTime;
 
@@ -241,6 +306,7 @@ export default function GameBoard() {
       setIsNearMiss(true);
       setNearMissPercent(entropyPercentage);
       setShake(true);
+      soundManager.playNearMiss();
       setTimeout(() => {
         setIsNearMiss(false);
         setShake(false);
@@ -253,6 +319,11 @@ export default function GameBoard() {
     // Update combo
     const newCombo = updateCombo(combo, true, timeSinceLastClear);
     setCombo(newCombo);
+
+    // Play combo sound if combo increased
+    if (newCombo > 1) {
+      soundManager.playCombo(newCombo);
+    }
 
     // Calculate reward - bonus points for clearing more tiles!
     const tilesCleared = matchingTileIds.length;
@@ -267,6 +338,16 @@ export default function GameBoard() {
 
     setScore(prev => prev + reward.points);
     setLastClearTime(now);
+
+    // Play appropriate sound based on clear type
+    if (reward.isCritical) {
+      soundManager.playCritical();
+    } else if (tilesCleared >= 4) {
+      soundManager.playBigClear();
+    } else {
+      // Normal clear with pitch based on tiles cleared
+      soundManager.playClear(1 + (tilesCleared - 3) * 0.2);
+    }
 
     // Show clear message for big clears
     if (tilesCleared >= 4 && !reward.isCritical) {
@@ -307,7 +388,7 @@ export default function GameBoard() {
         setShake(false);
       }, 1000);
     }
-  }, [combo, lastClearTime, tiles]);
+  }, [combo, lastClearTime, tiles, initSound]);
 
   // ============================================
   // AUTO-CLEAR DETECTION
@@ -451,10 +532,10 @@ export default function GameBoard() {
           </motion.div>
 
           {/* Control Buttons */}
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <motion.button
               className={`
-                chamfer-sm p-4 border-2 font-rajdhani font-bold tracking-wider text-sm
+                chamfer-sm px-3 py-2 border-2 font-rajdhani font-bold tracking-wider text-xs
                 ${isPaused
                   ? 'bg-neon-amber border-neon-amber text-void-black'
                   : 'bg-void-surface border-void-border text-text-muted hover:border-neon-cyan hover:text-neon-cyan'
@@ -470,12 +551,46 @@ export default function GameBoard() {
               {isPaused ? 'RESUME' : 'PAUSE'}
             </motion.button>
             <motion.button
-              className="chamfer-sm bg-void-surface border-2 border-void-border p-4 text-text-muted font-rajdhani font-bold tracking-wider text-sm hover:border-chaos hover:text-chaos"
+              className="chamfer-sm bg-void-surface border-2 border-void-border px-3 py-2 text-text-muted font-rajdhani font-bold tracking-wider text-xs hover:border-chaos hover:text-chaos"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               onClick={restartGame}
             >
               RESTART
+            </motion.button>
+            <motion.button
+              className={`
+                chamfer-sm px-3 py-2 border-2 font-rajdhani font-bold tracking-wider text-xs
+                ${soundEnabled
+                  ? 'bg-void-surface border-order text-order'
+                  : 'bg-void-surface border-void-border text-text-muted'
+                }
+              `}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => {
+                initSound();
+                toggleSound();
+              }}
+              title={soundEnabled ? 'Sound On' : 'Sound Off'}
+            >
+              {soundEnabled ? '♪ ON' : '♪ OFF'}
+            </motion.button>
+            <motion.button
+              className="chamfer-sm bg-void-surface border-2 border-void-border px-3 py-2 text-text-muted font-rajdhani font-bold tracking-wider text-xs hover:border-neon-violet hover:text-neon-violet"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={onHelp}
+            >
+              HELP
+            </motion.button>
+            <motion.button
+              className="chamfer-sm bg-void-surface border-2 border-void-border px-3 py-2 text-text-muted font-rajdhani font-bold tracking-wider text-xs hover:border-neon-magenta hover:text-neon-magenta"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={onHome}
+            >
+              HOME
             </motion.button>
           </div>
         </div>
@@ -646,8 +761,15 @@ export default function GameBoard() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5 }}
         >
-          <p className="tracking-moderate">
+          <p className="tracking-moderate mb-2">
             CLICK TILES TO CLEAR • MATCH 3+ TO REDUCE ENTROPY
+          </p>
+          <p className="text-xs opacity-60">
+            <span className="text-neon-cyan">[SPACE]</span> Pause
+            <span className="mx-2">•</span>
+            <span className="text-neon-cyan">[R]</span> Restart
+            <span className="mx-2">•</span>
+            <span className="text-neon-cyan">[ESC]</span> Pause
           </p>
         </motion.div>
       </motion.div>
