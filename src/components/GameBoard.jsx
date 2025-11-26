@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Tile from './Tile';
 import ParticleBurst from './ParticleBurst';
@@ -15,14 +15,15 @@ import {
   getDifficultyLevel,
   getStreakData,
   recordPlay,
+  applyGravity,
+  findAllMatches,
   GAME_CONFIG,
 } from '../lib/gameLogic';
 import { soundManager } from '../lib/sounds';
 
 /**
- * GameBoard Component (JUICE-INJECTED)
- * Implements the Entropy-Reduction Core Loop with AGGRESSIVE visual feedback
- * Features: AnimatePresence, particle bursts, screen shake, border flash
+ * GameBoard Component - ENHANCED WITH GRAVITY & CASCADE
+ * Features: Gravity system, chain reactions, touch/swipe support, enhanced visuals
  */
 
 const GRID_SIZE = 6;
@@ -33,6 +34,14 @@ const SPRING_CONFIG = {
   type: 'spring',
   stiffness: 300,
   damping: 20,
+};
+
+// Game phases for cascade animation
+const GAME_PHASE = {
+  IDLE: 'idle',
+  CLEARING: 'clearing',
+  FALLING: 'falling',
+  CASCADE_CHECK: 'cascade_check',
 };
 
 export default function GameBoard({ onHome, onHelp }) {
@@ -52,13 +61,21 @@ export default function GameBoard({ onHome, onHelp }) {
   const [particleBursts, setParticleBursts] = useState([]);
   const [isPaused, setIsPaused] = useState(false);
   const [highScore, setHighScore] = useState(() => {
-    const saved = localStorage.getItem('entropyReduction_highScore');
-    return saved ? parseInt(saved, 10) : 0;
+    try {
+      const saved = localStorage.getItem('entropyReduction_highScore');
+      return saved ? parseInt(saved, 10) : 0;
+    } catch {
+      return 0;
+    }
   });
   const [comboTimeLeft, setComboTimeLeft] = useState(0);
   const [soundEnabled, setSoundEnabled] = useState(() => {
-    const saved = localStorage.getItem('entropyReduction_soundEnabled');
-    return saved !== 'false'; // Default to true
+    try {
+      const saved = localStorage.getItem('entropyReduction_soundEnabled');
+      return saved !== 'false'; // Default to true
+    } catch {
+      return true;
+    }
   });
 
   // Game Over & Progression State
@@ -74,11 +91,25 @@ export default function GameBoard({ onHome, onHelp }) {
   });
   const [showShareCopied, setShowShareCopied] = useState(false);
 
+  // Cascade & Animation State
+  const [gamePhase, setGamePhase] = useState(GAME_PHASE.IDLE);
+  const cascadeLevelRef = useRef(0); // Track cascade level for scoring
+  const [fallingTiles, setFallingTiles] = useState(new Set());
+
   const gameBoardRef = useRef(null);
   const comboTimerRef = useRef(null);
   const soundInitialized = useRef(false);
   const lastDifficultyLevel = useRef(1);
   const spawnTimerRef = useRef(null);
+
+  // ============================================
+  // MEMOIZED COMPUTATIONS
+  // ============================================
+
+  const clearableTileIds = useMemo(() => {
+    if (gamePhase !== GAME_PHASE.IDLE) return [];
+    return findClearableTiles(tiles, GRID_SIZE);
+  }, [tiles, gamePhase]);
 
   // ============================================
   // GAME TIMER & DIFFICULTY PROGRESSION
@@ -124,9 +155,8 @@ export default function GameBoard({ onHome, onHelp }) {
   useEffect(() => {
     if (combo > 0 && !isPaused && !isGameOver) {
       const COMBO_TIMEOUT = 3000;
-      const updateInterval = 50; // Update every 50ms for smooth animation
+      const updateInterval = 50;
 
-      // Clear any existing timer
       if (comboTimerRef.current) {
         clearInterval(comboTimerRef.current);
       }
@@ -162,7 +192,11 @@ export default function GameBoard({ onHome, onHelp }) {
   useEffect(() => {
     if (score > highScore) {
       setHighScore(score);
-      localStorage.setItem('entropyReduction_highScore', score.toString());
+      try {
+        localStorage.setItem('entropyReduction_highScore', score.toString());
+      } catch {
+        // Ignore localStorage errors
+      }
     }
   }, [score, highScore]);
 
@@ -182,10 +216,13 @@ export default function GameBoard({ onHome, onHelp }) {
     const newEnabled = !soundEnabled;
     setSoundEnabled(newEnabled);
     soundManager.setEnabled(newEnabled);
-    localStorage.setItem('entropyReduction_soundEnabled', newEnabled.toString());
+    try {
+      localStorage.setItem('entropyReduction_soundEnabled', newEnabled.toString());
+    } catch {
+      // Ignore localStorage errors
+    }
   }, [soundEnabled]);
 
-  // Sync sound enabled state
   useEffect(() => {
     soundManager.setEnabled(soundEnabled);
   }, [soundEnabled]);
@@ -195,10 +232,8 @@ export default function GameBoard({ onHome, onHelp }) {
   // ============================================
 
   const restartGame = useCallback(() => {
-    // Reset tile ID counter
     tileIdCounter = 0;
 
-    // Generate new initial tiles
     const initialTiles = [];
     for (let i = 0; i < 12; i++) {
       const position = generateRandomPosition(GRID_SIZE, initialTiles);
@@ -212,7 +247,6 @@ export default function GameBoard({ onHome, onHelp }) {
       }
     }
 
-    // Reset all state
     setTiles(initialTiles);
     setScore(0);
     setCombo(0);
@@ -224,19 +258,20 @@ export default function GameBoard({ onHome, onHelp }) {
     setParticleBursts([]);
     setIsPaused(false);
     setComboTimeLeft(0);
-
-    // Reset game over & progression state
     setIsGameOver(false);
     setGameStartTime(Date.now());
     setGameTime(0);
     setDifficultyLevel(1);
     setMaxCombo(0);
     setTilesCleared(0);
+    setGamePhase(GAME_PHASE.IDLE);
+    cascadeLevelRef.current = 0;
+    setFallingTiles(new Set());
     lastDifficultyLevel.current = 1;
   }, []);
 
   // ============================================
-  // SHARE RESULTS (Social Currency)
+  // SHARE RESULTS
   // ============================================
 
   const generateShareText = useCallback(() => {
@@ -247,14 +282,13 @@ export default function GameBoard({ onHome, onHelp }) {
     const scoreBlocks = Math.min(10, Math.floor(score / 500));
     const scoreBar = '█'.repeat(scoreBlocks) + '░'.repeat(10 - scoreBlocks);
 
-    return `ENTROPY REDUCTION
+    return `⚡ ENTROPY REDUCTION ⚡
 🎯 Score: ${score.toLocaleString()}
 ⏱️ Time: ${timeStr}
 🔥 Max Combo: x${maxCombo}
 💀 Difficulty: ${difficultyLevel}/10
 📊 [${scoreBar}]
-${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}
-Play at: entropy-reduction.game`;
+${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
   }, [score, gameTime, maxCombo, difficultyLevel, streak]);
 
   const shareResults = useCallback(async () => {
@@ -269,13 +303,12 @@ Play at: entropy-reduction.game`;
         setTimeout(() => setShowShareCopied(false), 2000);
       }
     } catch {
-      // Fallback: just copy to clipboard
       try {
         await navigator.clipboard.writeText(text);
         setShowShareCopied(true);
         setTimeout(() => setShowShareCopied(false), 2000);
       } catch {
-        // Silent fail if clipboard also unavailable
+        // Silent fail
       }
     }
   }, [generateShareText]);
@@ -285,8 +318,10 @@ Play at: entropy-reduction.game`;
   // ============================================
 
   const togglePause = useCallback(() => {
-    setIsPaused(prev => !prev);
-  }, []);
+    if (!isGameOver) {
+      setIsPaused(prev => !prev);
+    }
+  }, [isGameOver]);
 
   // ============================================
   // KEYBOARD SHORTCUTS
@@ -294,14 +329,13 @@ Play at: entropy-reduction.game`;
 
   useEffect(() => {
     const handleKeyDown = (e) => {
-      // Don't trigger if user is typing in an input
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
       switch (e.code) {
         case 'Space':
         case 'Escape':
           e.preventDefault();
-          togglePause();
+          if (!isGameOver) togglePause();
           break;
         case 'KeyR':
           e.preventDefault();
@@ -318,7 +352,7 @@ Play at: entropy-reduction.game`;
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [togglePause, restartGame, onHelp]);
+  }, [togglePause, restartGame, onHelp, isGameOver]);
 
   // ============================================
   // INITIALIZATION
@@ -351,28 +385,22 @@ Play at: entropy-reduction.game`;
   }, [tiles]);
 
   // ============================================
-  // ZEIGARNIK EFFECT: CONTINUOUS ENTROPY GENERATION
+  // ENTROPY SPAWNING
   // ============================================
 
   useEffect(() => {
-    // Clear any existing timer
     if (spawnTimerRef.current) {
       clearTimeout(spawnTimerRef.current);
       spawnTimerRef.current = null;
     }
 
-    // Don't spawn when paused, game over, or board is full
-    if (isPaused || isGameOver) return;
-
-    // Check if board has room for more tiles
+    if (isPaused || isGameOver || gamePhase !== GAME_PHASE.IDLE) return;
     if (tiles.length >= GRID_SIZE * GRID_SIZE - 2) return;
 
-    // Calculate delay based on current game time (read from ref to avoid dependency)
     const currentGameTime = Date.now() - gameStartTime;
     const spawnDelay = calculateSpawnDelay(currentGameTime);
 
     spawnTimerRef.current = setTimeout(() => {
-      // Re-check conditions before spawning
       setTiles(prevTiles => {
         if (prevTiles.length >= GRID_SIZE * GRID_SIZE - 2) {
           return prevTiles;
@@ -397,6 +425,10 @@ Play at: entropy-reduction.game`;
           }
         }
 
+        if (newTiles.length > 0) {
+          soundManager.playSpawn();
+        }
+
         if (newTiles.length === 0) return prevTiles;
         return [...prevTiles, ...newTiles];
       });
@@ -408,141 +440,190 @@ Play at: entropy-reduction.game`;
         spawnTimerRef.current = null;
       }
     };
-  }, [tiles.length, isPaused, isGameOver, gameStartTime]);
+  }, [tiles.length, isPaused, isGameOver, gameStartTime, gamePhase]);
 
   // ============================================
-  // CLEAR MECHANICS
+  // CASCADE PROCESSING
+  // ============================================
+
+  const processCascadeStep = useCallback((tilesToClear, currentCascadeLevel) => {
+    if (tilesToClear.length === 0) {
+      setGamePhase(GAME_PHASE.IDLE);
+      cascadeLevelRef.current = 0;
+      return;
+    }
+
+    // Phase 1: Clear tiles
+    setGamePhase(GAME_PHASE.CLEARING);
+
+    // Calculate points for this cascade step
+    const basePoints = GAME_CONFIG.BASE_POINTS_PER_CLEAR * tilesToClear.length;
+    const matchBonus = tilesToClear.length > 3 ? 1 + (tilesToClear.length - 3) * 0.5 : 1;
+    const reward = calculateReward(
+      Math.floor(basePoints * matchBonus),
+      combo,
+      currentCascadeLevel
+    );
+
+    setScore(prev => prev + reward.points);
+    setTilesCleared(prev => prev + tilesToClear.length);
+
+    // Show cascade message
+    if (reward.message) {
+      setCriticalMessage(reward.message);
+      if (reward.isCritical) {
+        setShake(true);
+        soundManager.playCritical();
+      } else if (currentCascadeLevel > 0) {
+        soundManager.playBigClear();
+      }
+      setTimeout(() => {
+        setCriticalMessage(null);
+        setShake(false);
+      }, 800);
+    } else {
+      soundManager.playClear(1 + (tilesToClear.length - 3) * 0.2);
+    }
+
+    // Remove cleared tiles after animation
+    setTimeout(() => {
+      setTiles(prevTiles => {
+        const remainingTiles = prevTiles.filter(t => !tilesToClear.includes(t.id));
+
+        // Phase 2: Apply gravity
+        setGamePhase(GAME_PHASE.FALLING);
+        const { newTiles, fallAnimations } = applyGravity(remainingTiles, GRID_SIZE);
+
+        // Track falling tiles
+        setFallingTiles(new Set(fallAnimations.map(f => f.tileId)));
+
+        // After fall animation, check for cascades
+        setTimeout(() => {
+          setFallingTiles(new Set());
+          setTiles(newTiles);
+
+          // Phase 3: Check for new matches
+          setGamePhase(GAME_PHASE.CASCADE_CHECK);
+          const newMatches = findAllMatches(newTiles, GRID_SIZE);
+
+          if (newMatches.length > 0) {
+            // Continue cascade
+            cascadeLevelRef.current = currentCascadeLevel + 1;
+            setTimeout(() => {
+              processCascadeStep(newMatches, currentCascadeLevel + 1);
+            }, GAME_CONFIG.CASCADE_DELAY_MS);
+          } else {
+            // Cascade complete
+            setGamePhase(GAME_PHASE.IDLE);
+            cascadeLevelRef.current = 0;
+          }
+        }, GAME_CONFIG.FALL_ANIMATION_MS);
+
+        return newTiles;
+      });
+    }, GAME_CONFIG.CLEAR_ANIMATION_MS);
+  }, [combo]);
+
+  // ============================================
+  // TILE CLEAR HANDLER
   // ============================================
 
   const handleTileClear = useCallback((tileId) => {
-    // Don't allow clearing during game over
-    if (isGameOver) return;
+    if (isGameOver || gamePhase !== GAME_PHASE.IDLE) return;
 
-    // Initialize sound on first user interaction
     initSound();
 
     const now = Date.now();
     const timeSinceLastClear = now - lastClearTime;
 
-    // Find ALL tiles in the matching group (not just the clicked one)
     const matchingTileIds = findMatchingGroup(tiles, tileId, GRID_SIZE);
 
     if (matchingTileIds.length === 0) return;
 
-    // Get clicked tile position for particle burst
+    // Get clicked tile for particle burst
     const clearedTile = tiles.find(t => t.id === tileId);
-    const tileElement = document.querySelector(`[data-tile-id="${tileId}"]`);
+    const tileElement = gameBoardRef.current?.querySelector(`[data-tile-id="${tileId}"]`);
 
-    // Calculate remaining tiles for near-miss detection
+    // Check for near-miss after this clear
     const remainingTilesAfterClear = tiles.filter(t => !matchingTileIds.includes(t.id));
-    const remainingClearableAfterClear = findClearableTiles(remainingTilesAfterClear, GRID_SIZE);
+    const { newTiles: tilesAfterGravity } = applyGravity(remainingTilesAfterClear, GRID_SIZE);
+    const remainingClearableAfterClear = findClearableTiles(tilesAfterGravity, GRID_SIZE);
 
-    // Near-miss = No more clearable tiles after this, but board still has 15%+ entropy
     const isLastClearable = remainingClearableAfterClear.length === 0;
-    const hasSignificantEntropy = remainingTilesAfterClear.length >= (GRID_SIZE * GRID_SIZE) * 0.15;
-    const entropyPercentage = Math.round((remainingTilesAfterClear.length / (GRID_SIZE * GRID_SIZE)) * 100);
+    const hasSignificantEntropy = tilesAfterGravity.length >= (GRID_SIZE * GRID_SIZE) * 0.15;
+    const entropyPercentage = Math.round((tilesAfterGravity.length / (GRID_SIZE * GRID_SIZE)) * 100);
 
     if (isLastClearable && hasSignificantEntropy) {
       setIsNearMiss(true);
       setNearMissPercent(entropyPercentage);
-      setShake(true);
       soundManager.playNearMiss();
       setTimeout(() => {
         setIsNearMiss(false);
-        setShake(false);
       }, 800);
     }
-
-    // Clear ALL matching tiles at once
-    setTiles(prev => prev.filter(t => !matchingTileIds.includes(t.id)));
 
     // Update combo
     const newCombo = updateCombo(combo, true, timeSinceLastClear);
     setCombo(newCombo);
 
-    // Track max combo
     if (newCombo > maxCombo) {
       setMaxCombo(newCombo);
     }
 
-    // Track total tiles cleared
-    setTilesCleared(prev => prev + matchingTileIds.length);
-
-    // Play combo sound if combo increased
     if (newCombo > 1) {
       soundManager.playCombo(newCombo);
     }
 
-    // Calculate reward - bonus points for clearing more tiles!
-    const clearedCount = matchingTileIds.length;
-    const basePoints = GAME_CONFIG.BASE_POINTS_PER_CLEAR * clearedCount;
-    // Bonus multiplier for clearing 4+ tiles (match-4, match-5, etc.)
-    const matchBonus = clearedCount > 3 ? 1 + (clearedCount - 3) * 0.5 : 1;
-
-    const reward = calculateReward(
-      Math.floor(basePoints * matchBonus),
-      newCombo
-    );
-
-    setScore(prev => prev + reward.points);
     setLastClearTime(now);
 
-    // Play appropriate sound based on clear type
-    if (reward.isCritical) {
-      soundManager.playCritical();
-    } else if (clearedCount >= 4) {
-      soundManager.playBigClear();
-    } else {
-      // Normal clear with pitch based on tiles cleared
-      soundManager.playClear(1 + (clearedCount - 3) * 0.2);
-    }
+    // Trigger particle burst for critical or big clears
+    if (tileElement && clearedTile && matchingTileIds.length >= 4) {
+      const rect = tileElement.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
 
-    // Show clear message for big clears
-    if (clearedCount >= 4 && !reward.isCritical) {
-      setCriticalMessage(clearedCount >= 5 ? 'MASSIVE CLEAR!' : 'GREAT CLEAR!');
-      setTimeout(() => setCriticalMessage(null), 800);
-    }
-
-    // CRITICAL CLEAR FEEDBACK
-    if (reward.isCritical) {
-      setCriticalMessage(reward.message);
-      setShake(true);
-
-      // Trigger particle burst at tile position
-      if (tileElement && clearedTile) {
-        const rect = tileElement.getBoundingClientRect();
-        const centerX = rect.left + rect.width / 2;
-        const centerY = rect.top + rect.height / 2;
-
-        const burstId = Date.now();
-        setParticleBursts(prev => [
-          ...prev,
-          {
-            id: burstId,
-            x: centerX,
-            y: centerY,
-            color: '#a855f7', // Violet for critical
-          },
-        ]);
-
-        // Remove burst after animation completes
-        setTimeout(() => {
-          setParticleBursts(prev => prev.filter(b => b.id !== burstId));
-        }, 1200);
-      }
+      const burstId = Date.now();
+      setParticleBursts(prev => [
+        ...prev,
+        {
+          id: burstId,
+          x: centerX,
+          y: centerY,
+          color: clearedTile.type === 'cyan' ? '#00f0ff' :
+                 clearedTile.type === 'magenta' ? '#ff00ff' :
+                 clearedTile.type === 'amber' ? '#ffb000' : '#a855f7',
+        },
+      ]);
 
       setTimeout(() => {
-        setCriticalMessage(null);
-        setShake(false);
-      }, 1000);
+        setParticleBursts(prev => prev.filter(b => b.id !== burstId));
+      }, 1200);
     }
-  }, [combo, lastClearTime, tiles, initSound, isGameOver, maxCombo]);
+
+    // Start cascade processing
+    processCascadeStep(matchingTileIds, 0);
+  }, [combo, lastClearTime, tiles, initSound, isGameOver, maxCombo, gamePhase, processCascadeStep]);
 
   // ============================================
-  // AUTO-CLEAR DETECTION
+  // TOUCH HANDLERS FOR SWIPE
   // ============================================
 
-  const clearableTileIds = findClearableTiles(tiles, GRID_SIZE);
+  const touchStartRef = useRef(null);
+
+  const handleBoardTouchStart = useCallback((e) => {
+    const touch = e.touches[0];
+    touchStartRef.current = {
+      x: touch.clientX,
+      y: touch.clientY,
+      time: Date.now(),
+    };
+  }, []);
+
+  const handleBoardTouchEnd = useCallback(() => {
+    // Touch end cleanup - actual tap handling is done in Tile component
+    // Swipe gestures could be added here for future features
+    touchStartRef.current = null;
+  }, []);
 
   // ============================================
   // RENDER
@@ -551,11 +632,9 @@ Play at: entropy-reduction.game`;
   return (
     <div
       ref={gameBoardRef}
-      className={`
-        w-full h-full
-        flex flex-col
-        p-8
-      `}
+      className="w-full h-full flex flex-col p-4 md:p-8 touch-none"
+      onTouchStart={handleBoardTouchStart}
+      onTouchEnd={handleBoardTouchEnd}
     >
       {/* SCREEN SHAKE CONTAINER */}
       <motion.div
@@ -567,10 +646,10 @@ Play at: entropy-reduction.game`;
         transition={{ duration: 0.4 }}
       >
         {/* Header Stats */}
-        <div className="flex justify-between items-start mb-8 gap-4">
+        <div className="flex flex-wrap justify-between items-start mb-4 md:mb-8 gap-2 md:gap-4">
           {/* Score + High Score */}
           <motion.div
-            className="chamfer-sm bg-void-surface border-2 border-neon-cyan p-4 min-w-[200px] relative"
+            className="chamfer-sm bg-void-surface border-2 border-neon-cyan p-2 md:p-4 min-w-[140px] md:min-w-[200px] relative"
             style={{
               boxShadow: '0 0 20px #00f0ff, inset 0 0 20px rgba(0, 240, 255, 0.2)',
             }}
@@ -581,13 +660,13 @@ Play at: entropy-reduction.game`;
             transition={SPRING_CONFIG}
           >
             <div className="flex justify-between items-center mb-1">
-              <div className="text-header text-neon-cyan text-sm">SCORE</div>
-              <div className="text-header text-text-muted text-xs">
+              <div className="text-header text-neon-cyan text-xs md:text-sm">SCORE</div>
+              <div className="text-header text-text-muted text-[10px] md:text-xs">
                 BEST: {highScore.toLocaleString()}
               </div>
             </div>
             <motion.div
-              className="text-score text-4xl text-white"
+              className="text-score text-2xl md:text-4xl text-white"
               key={score}
               initial={{ scale: 1.3, color: '#00f0ff' }}
               animate={{ scale: 1, color: '#ffffff' }}
@@ -599,9 +678,7 @@ Play at: entropy-reduction.game`;
 
           {/* Combo with Timer */}
           <motion.div
-            className={`
-              chamfer-sm bg-void-surface border-2 p-4 min-w-[150px]
-            `}
+            className="chamfer-sm bg-void-surface border-2 p-2 md:p-4 min-w-[100px] md:min-w-[150px]"
             style={{
               borderColor: combo > 0 ? '#ffb000' : '#1a1a28',
               boxShadow: combo > 0
@@ -613,11 +690,11 @@ Play at: entropy-reduction.game`;
             }}
             transition={{ duration: 0.3 }}
           >
-            <div className="text-header text-neon-amber text-sm mb-1">COMBO</div>
+            <div className="text-header text-neon-amber text-xs md:text-sm mb-1">COMBO</div>
             <AnimatePresence mode="wait">
               <motion.div
                 key={combo}
-                className="text-score text-3xl text-white"
+                className="text-score text-xl md:text-3xl text-white"
                 initial={{ y: -20, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 exit={{ y: 20, opacity: 0 }}
@@ -626,7 +703,6 @@ Play at: entropy-reduction.game`;
                 {combo > 0 ? `x${combo}` : '--'}
               </motion.div>
             </AnimatePresence>
-            {/* Combo Timer Bar */}
             <div className="mt-2 h-1 bg-void-deep rounded-full overflow-hidden">
               <motion.div
                 className="h-full"
@@ -641,9 +717,7 @@ Play at: entropy-reduction.game`;
 
           {/* Entropy Level */}
           <motion.div
-            className={`
-              chamfer-sm bg-void-surface border-2 p-4 min-w-[180px]
-            `}
+            className="chamfer-sm bg-void-surface border-2 p-2 md:p-4 min-w-[120px] md:min-w-[180px]"
             style={{
               borderColor: entropyLevel > 70 ? '#ff3366' : '#1a1a28',
               boxShadow: entropyLevel > 70
@@ -658,10 +732,10 @@ Play at: entropy-reduction.game`;
               repeat: entropyLevel > 80 ? Infinity : 0,
             }}
           >
-            <div className="text-header text-chaos text-sm mb-1">ENTROPY</div>
+            <div className="text-header text-chaos text-xs md:text-sm mb-1">ENTROPY</div>
             <div className="flex items-center gap-2">
               <motion.div
-                className="text-score text-3xl text-white"
+                className="text-score text-xl md:text-3xl text-white"
                 animate={{
                   color: entropyLevel > 70 ? '#ff3366' : '#ffffff',
                 }}
@@ -688,7 +762,7 @@ Play at: entropy-reduction.game`;
                 {Array.from({ length: 10 }).map((_, i) => (
                   <motion.div
                     key={i}
-                    className="w-2 h-3 rounded-sm"
+                    className="w-1.5 md:w-2 h-2 md:h-3 rounded-sm"
                     style={{
                       backgroundColor: i < difficultyLevel ? '#a855f7' : '#1a1a28',
                       boxShadow: i < difficultyLevel ? '0 0 4px #a855f7' : 'none',
@@ -707,66 +781,61 @@ Play at: entropy-reduction.game`;
               )}
             </div>
             {/* Control Buttons */}
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-1 md:gap-2">
               <motion.button
-                className={`
-                  chamfer-sm px-3 py-2 border-2 font-rajdhani font-bold tracking-wider text-xs
+                className={`chamfer-sm px-2 md:px-3 py-1 md:py-2 border-2 font-rajdhani font-bold tracking-wider text-[10px] md:text-xs
                   ${isPaused
                     ? 'bg-neon-amber border-neon-amber text-void-black'
                     : 'bg-void-surface border-void-border text-text-muted hover:border-neon-cyan hover:text-neon-cyan'
-                  }
-                `}
-              style={{
-                boxShadow: isPaused ? '0 0 20px #ffb000' : 'none',
-              }}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={togglePause}
-            >
-              {isPaused ? 'RESUME' : 'PAUSE'}
-            </motion.button>
-            <motion.button
-              className="chamfer-sm bg-void-surface border-2 border-void-border px-3 py-2 text-text-muted font-rajdhani font-bold tracking-wider text-xs hover:border-chaos hover:text-chaos"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={restartGame}
-            >
-              RESTART
-            </motion.button>
-            <motion.button
-              className={`
-                chamfer-sm px-3 py-2 border-2 font-rajdhani font-bold tracking-wider text-xs
-                ${soundEnabled
-                  ? 'bg-void-surface border-order text-order'
-                  : 'bg-void-surface border-void-border text-text-muted'
-                }
-              `}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => {
-                initSound();
-                toggleSound();
-              }}
-              title={soundEnabled ? 'Sound On' : 'Sound Off'}
-            >
-              {soundEnabled ? '♪ ON' : '♪ OFF'}
-            </motion.button>
-            <motion.button
-              className="chamfer-sm bg-void-surface border-2 border-void-border px-3 py-2 text-text-muted font-rajdhani font-bold tracking-wider text-xs hover:border-neon-violet hover:text-neon-violet"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={onHelp}
-            >
-              HELP
-            </motion.button>
-            <motion.button
-              className="chamfer-sm bg-void-surface border-2 border-void-border px-3 py-2 text-text-muted font-rajdhani font-bold tracking-wider text-xs hover:border-neon-magenta hover:text-neon-magenta"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={onHome}
-            >
-              HOME
-            </motion.button>
+                  }`}
+                style={{
+                  boxShadow: isPaused ? '0 0 20px #ffb000' : 'none',
+                }}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={togglePause}
+              >
+                {isPaused ? 'RESUME' : 'PAUSE'}
+              </motion.button>
+              <motion.button
+                className="chamfer-sm bg-void-surface border-2 border-void-border px-2 md:px-3 py-1 md:py-2 text-text-muted font-rajdhani font-bold tracking-wider text-[10px] md:text-xs hover:border-chaos hover:text-chaos"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={restartGame}
+              >
+                RESTART
+              </motion.button>
+              <motion.button
+                className={`chamfer-sm px-2 md:px-3 py-1 md:py-2 border-2 font-rajdhani font-bold tracking-wider text-[10px] md:text-xs
+                  ${soundEnabled
+                    ? 'bg-void-surface border-order text-order'
+                    : 'bg-void-surface border-void-border text-text-muted'
+                  }`}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => {
+                  initSound();
+                  toggleSound();
+                }}
+              >
+                {soundEnabled ? '♪' : '♪̸'}
+              </motion.button>
+              <motion.button
+                className="chamfer-sm bg-void-surface border-2 border-void-border px-2 md:px-3 py-1 md:py-2 text-text-muted font-rajdhani font-bold tracking-wider text-[10px] md:text-xs hover:border-neon-violet hover:text-neon-violet"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={onHelp}
+              >
+                ?
+              </motion.button>
+              <motion.button
+                className="chamfer-sm bg-void-surface border-2 border-void-border px-2 md:px-3 py-1 md:py-2 text-text-muted font-rajdhani font-bold tracking-wider text-[10px] md:text-xs hover:border-neon-magenta hover:text-neon-magenta"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={onHome}
+              >
+                ✕
+              </motion.button>
             </div>
           </div>
         </div>
@@ -786,7 +855,7 @@ Play at: entropy-reduction.game`;
               }}
             >
               <motion.div
-                className="text-impact text-6xl text-neon-violet"
+                className="text-impact text-4xl md:text-6xl text-neon-violet px-4 text-center"
                 style={{
                   textShadow: '0 0 40px #a855f7, 0 0 80px #a855f7',
                 }}
@@ -815,17 +884,12 @@ Play at: entropy-reduction.game`;
             <motion.div
               className="fixed top-1/3 left-1/2 pointer-events-none z-40"
               initial={{ x: '-50%', y: -50, opacity: 0, scale: 0.5 }}
-              animate={{
-                x: '-50%',
-                y: 0,
-                opacity: 1,
-                scale: 1,
-              }}
+              animate={{ x: '-50%', y: 0, opacity: 1, scale: 1 }}
               exit={{ y: 50, opacity: 0, scale: 0.5 }}
               transition={SPRING_CONFIG}
             >
               <div
-                className="text-header text-2xl text-neon-magenta px-8 py-4 chamfer-sm border-2 border-neon-magenta bg-void-deep"
+                className="text-header text-lg md:text-2xl text-neon-magenta px-4 md:px-8 py-2 md:py-4 chamfer-sm border-2 border-neon-magenta bg-void-deep whitespace-nowrap"
                 style={{
                   boxShadow: '0 0 40px #ff00ff, inset 0 0 20px rgba(255, 0, 255, 0.3)',
                 }}
@@ -853,16 +917,16 @@ Play at: entropy-reduction.game`;
                 exit={{ scale: 0.8, y: 20 }}
               >
                 <div
-                  className="text-impact text-6xl text-neon-cyan mb-4"
+                  className="text-impact text-4xl md:text-6xl text-neon-cyan mb-4"
                   style={{ textShadow: '0 0 40px #00f0ff' }}
                 >
                   PAUSED
                 </div>
-                <div className="text-header text-text-muted text-lg mb-8">
+                <div className="text-header text-text-muted text-sm md:text-lg mb-8">
                   ENTROPY GENERATION HALTED
                 </div>
                 <motion.button
-                  className="chamfer-sm bg-neon-cyan text-void-black px-8 py-4 font-rajdhani font-bold text-xl tracking-wider"
+                  className="chamfer-sm bg-neon-cyan text-void-black px-6 md:px-8 py-3 md:py-4 font-rajdhani font-bold text-lg md:text-xl tracking-wider"
                   style={{ boxShadow: '0 0 30px #00f0ff' }}
                   whileHover={{ scale: 1.05, boxShadow: '0 0 50px #00f0ff' }}
                   whileTap={{ scale: 0.95 }}
@@ -879,21 +943,20 @@ Play at: entropy-reduction.game`;
         <AnimatePresence>
           {isGameOver && (
             <motion.div
-              className="fixed inset-0 bg-void-black/95 flex items-center justify-center z-50"
+              className="fixed inset-0 bg-void-black/95 flex items-center justify-center z-50 p-4"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.3 }}
             >
               <motion.div
-                className="text-center max-w-md mx-4"
+                className="text-center max-w-md w-full"
                 initial={{ scale: 0.8, y: 30 }}
                 animate={{ scale: 1, y: 0 }}
                 transition={{ delay: 0.2, type: 'spring', stiffness: 200 }}
               >
-                {/* Game Over Title */}
                 <motion.div
-                  className="text-impact text-5xl md:text-6xl text-chaos mb-2"
+                  className="text-impact text-3xl md:text-5xl text-chaos mb-2"
                   style={{ textShadow: '0 0 40px #ff3366, 0 0 80px #ff3366' }}
                   animate={{
                     textShadow: [
@@ -906,52 +969,50 @@ Play at: entropy-reduction.game`;
                 >
                   ENTROPY OVERFLOW
                 </motion.div>
-                <div className="text-text-muted text-lg mb-6">System collapse imminent...</div>
+                <div className="text-text-muted text-sm md:text-lg mb-6">System collapse imminent...</div>
 
-                {/* Stats Card */}
                 <motion.div
-                  className="chamfer-lg bg-void-surface border-2 border-neon-cyan p-6 mb-6"
+                  className="chamfer-lg bg-void-surface border-2 border-neon-cyan p-4 md:p-6 mb-6"
                   style={{ boxShadow: '0 0 30px #00f0ff' }}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.4 }}
                 >
-                  <div className="grid grid-cols-2 gap-4 text-left">
+                  <div className="grid grid-cols-2 gap-3 md:gap-4 text-left">
                     <div>
-                      <div className="text-xs text-text-muted font-rajdhani tracking-wider">FINAL SCORE</div>
-                      <div className="text-2xl font-bold text-white">{score.toLocaleString()}</div>
+                      <div className="text-[10px] md:text-xs text-text-muted font-rajdhani tracking-wider">FINAL SCORE</div>
+                      <div className="text-xl md:text-2xl font-bold text-white">{score.toLocaleString()}</div>
                       {score >= highScore && score > 0 && (
-                        <div className="text-xs text-neon-amber">NEW HIGH SCORE!</div>
+                        <div className="text-[10px] md:text-xs text-neon-amber">NEW HIGH SCORE!</div>
                       )}
                     </div>
                     <div>
-                      <div className="text-xs text-text-muted font-rajdhani tracking-wider">SURVIVAL TIME</div>
-                      <div className="text-2xl font-bold text-white">
+                      <div className="text-[10px] md:text-xs text-text-muted font-rajdhani tracking-wider">SURVIVAL TIME</div>
+                      <div className="text-xl md:text-2xl font-bold text-white">
                         {Math.floor(gameTime / 60000)}:{((gameTime % 60000) / 1000).toFixed(0).padStart(2, '0')}
                       </div>
                     </div>
                     <div>
-                      <div className="text-xs text-text-muted font-rajdhani tracking-wider">MAX COMBO</div>
-                      <div className="text-2xl font-bold text-neon-amber">x{maxCombo}</div>
+                      <div className="text-[10px] md:text-xs text-text-muted font-rajdhani tracking-wider">MAX COMBO</div>
+                      <div className="text-xl md:text-2xl font-bold text-neon-amber">x{maxCombo}</div>
                     </div>
                     <div>
-                      <div className="text-xs text-text-muted font-rajdhani tracking-wider">TILES CLEARED</div>
-                      <div className="text-2xl font-bold text-neon-cyan">{tilesCleared}</div>
+                      <div className="text-[10px] md:text-xs text-text-muted font-rajdhani tracking-wider">TILES CLEARED</div>
+                      <div className="text-xl md:text-2xl font-bold text-neon-cyan">{tilesCleared}</div>
                     </div>
                     <div>
-                      <div className="text-xs text-text-muted font-rajdhani tracking-wider">DIFFICULTY</div>
-                      <div className="text-2xl font-bold text-neon-violet">{difficultyLevel}/10</div>
+                      <div className="text-[10px] md:text-xs text-text-muted font-rajdhani tracking-wider">DIFFICULTY</div>
+                      <div className="text-xl md:text-2xl font-bold text-neon-violet">{difficultyLevel}/10</div>
                     </div>
                     <div>
-                      <div className="text-xs text-text-muted font-rajdhani tracking-wider">DAILY STREAK</div>
-                      <div className="text-2xl font-bold text-order">
+                      <div className="text-[10px] md:text-xs text-text-muted font-rajdhani tracking-wider">DAILY STREAK</div>
+                      <div className="text-xl md:text-2xl font-bold text-order">
                         {streak > 0 ? `${streak} days` : '--'}
                       </div>
                     </div>
                   </div>
                 </motion.div>
 
-                {/* Action Buttons */}
                 <motion.div
                   className="flex flex-col gap-3"
                   initial={{ opacity: 0 }}
@@ -959,7 +1020,7 @@ Play at: entropy-reduction.game`;
                   transition={{ delay: 0.6 }}
                 >
                   <motion.button
-                    className="chamfer-sm bg-neon-cyan text-void-black px-8 py-4 font-rajdhani font-bold text-xl tracking-wider w-full"
+                    className="chamfer-sm bg-neon-cyan text-void-black px-6 md:px-8 py-3 md:py-4 font-rajdhani font-bold text-lg md:text-xl tracking-wider w-full"
                     style={{ boxShadow: '0 0 30px #00f0ff' }}
                     whileHover={{ scale: 1.02, boxShadow: '0 0 50px #00f0ff' }}
                     whileTap={{ scale: 0.98 }}
@@ -969,7 +1030,7 @@ Play at: entropy-reduction.game`;
                   </motion.button>
 
                   <motion.button
-                    className="chamfer-sm bg-void-surface border-2 border-neon-violet text-neon-violet px-8 py-3 font-rajdhani font-bold text-lg tracking-wider w-full relative"
+                    className="chamfer-sm bg-void-surface border-2 border-neon-violet text-neon-violet px-6 md:px-8 py-2 md:py-3 font-rajdhani font-bold text-base md:text-lg tracking-wider w-full"
                     whileHover={{ scale: 1.02, boxShadow: '0 0 20px #a855f7' }}
                     whileTap={{ scale: 0.98 }}
                     onClick={shareResults}
@@ -978,7 +1039,7 @@ Play at: entropy-reduction.game`;
                   </motion.button>
 
                   <motion.button
-                    className="chamfer-sm bg-void-surface border-2 border-void-border text-text-muted px-8 py-3 font-rajdhani font-bold text-lg tracking-wider w-full hover:border-neon-magenta hover:text-neon-magenta"
+                    className="chamfer-sm bg-void-surface border-2 border-void-border text-text-muted px-6 md:px-8 py-2 md:py-3 font-rajdhani font-bold text-base md:text-lg tracking-wider w-full hover:border-neon-magenta hover:text-neon-magenta"
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={onHome}
@@ -992,14 +1053,14 @@ Play at: entropy-reduction.game`;
         </AnimatePresence>
 
         {/* Game Board */}
-        <div className="flex-1 flex items-center justify-center scanlines">
+        <div className="flex-1 flex items-center justify-center">
           <motion.div
-            className="chamfer-tech bg-void-deep border-2 p-6"
+            className="relative bg-void-deep border-2 p-2 md:p-4 rounded-lg"
             style={{
               borderColor: isNearMiss ? '#ff3366' : '#00f0ff',
               boxShadow: isNearMiss
-                ? '0 0 60px #ff3366'
-                : '0 0 40px #00f0ff',
+                ? '0 0 60px #ff3366, inset 0 0 30px rgba(255, 51, 102, 0.2)'
+                : '0 0 40px #00f0ff, inset 0 0 20px rgba(0, 240, 255, 0.1)',
             }}
             animate={{
               borderColor: isNearMiss
@@ -1008,13 +1069,25 @@ Play at: entropy-reduction.game`;
             }}
             transition={{ duration: 0.3 }}
           >
+            {/* Grid background pattern */}
             <div
-              className="grid gap-2"
+              className="absolute inset-2 md:inset-4 opacity-20 pointer-events-none"
+              style={{
+                backgroundImage: `
+                  linear-gradient(to right, #00f0ff 1px, transparent 1px),
+                  linear-gradient(to bottom, #00f0ff 1px, transparent 1px)
+                `,
+                backgroundSize: `${GAME_CONFIG.CELL_SIZE}px ${GAME_CONFIG.CELL_SIZE}px`,
+              }}
+            />
+
+            <div
+              className="grid gap-1 md:gap-2 relative"
               style={{
                 gridTemplateColumns: `repeat(${GRID_SIZE}, 1fr)`,
                 gridTemplateRows: `repeat(${GRID_SIZE}, 1fr)`,
-                width: `${GRID_SIZE * 70}px`,
-                height: `${GRID_SIZE * 70}px`,
+                width: `${GRID_SIZE * 56}px`,
+                height: `${GRID_SIZE * 56}px`,
               }}
             >
               {/* Render grid cells */}
@@ -1026,16 +1099,21 @@ Play at: entropy-reduction.game`;
                 return (
                   <div
                     key={`cell-${x}-${y}`}
-                    className="relative bg-void-surface border border-void-border"
+                    className="relative bg-void-surface/50 rounded"
+                    style={{
+                      width: '52px',
+                      height: '52px',
+                    }}
                     data-tile-id={tile?.id}
                   >
-                    <AnimatePresence mode="wait">
+                    <AnimatePresence mode="popLayout">
                       {tile && (
                         <Tile
                           key={tile.id}
                           tile={tile}
                           onClear={handleTileClear}
                           isClearable={clearableTileIds.includes(tile.id)}
+                          isFalling={fallingTiles.has(tile.id)}
                         />
                       )}
                     </AnimatePresence>
@@ -1048,20 +1126,18 @@ Play at: entropy-reduction.game`;
 
         {/* Footer Info */}
         <motion.div
-          className="mt-6 text-center text-text-muted text-sm font-exo"
+          className="mt-4 md:mt-6 text-center text-text-muted text-xs md:text-sm font-exo"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5 }}
         >
           <p className="tracking-moderate mb-2">
-            CLICK TILES TO CLEAR • MATCH 3+ TO REDUCE ENTROPY
+            TAP MATCHING TILES TO CLEAR • CHAIN REACTIONS FOR BONUS POINTS
           </p>
-          <p className="text-xs opacity-60">
+          <p className="text-[10px] md:text-xs opacity-60 hidden md:block">
             <span className="text-neon-cyan">[SPACE]</span> Pause
             <span className="mx-2">•</span>
             <span className="text-neon-cyan">[R]</span> Restart
-            <span className="mx-2">•</span>
-            <span className="text-neon-cyan">[ESC]</span> Pause
           </p>
         </motion.div>
       </motion.div>

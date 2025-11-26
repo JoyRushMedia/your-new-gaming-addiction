@@ -1,6 +1,7 @@
 /**
  * PSYCHOLOGICAL GAME LOGIC
  * Implements behavioral principles from the design framework
+ * Enhanced with gravity and cascade mechanics
  */
 
 // ============================================
@@ -8,6 +9,10 @@
 // ============================================
 
 export const GAME_CONFIG = {
+  // Grid Configuration
+  GRID_SIZE: 6,
+  CELL_SIZE: 70, // pixels per cell for animations
+
   // Variable Ratio Schedule (cite: 37, 38)
   CRITICAL_CLEAR_CHANCE: 0.10, // 10% chance for dopamine spike
   CRITICAL_MULTIPLIER: 3.5,     // 3.5x reward on critical
@@ -28,10 +33,16 @@ export const GAME_CONFIG = {
   // Scoring
   BASE_POINTS_PER_CLEAR: 10,
   COMBO_MULTIPLIER: 1.5,
+  CASCADE_BONUS: 1.25, // 25% bonus per cascade level
 
   // Flow/Difficulty Progression
   DIFFICULTY_RAMP_INTERVAL: 30000, // Increase difficulty every 30 seconds
   DIFFICULTY_RAMP_AMOUNT: 100,     // Reduce spawn delay by 100ms each interval
+
+  // Animation Timing
+  CLEAR_ANIMATION_MS: 300,
+  FALL_ANIMATION_MS: 250,
+  CASCADE_DELAY_MS: 100,
 };
 
 // ============================================
@@ -79,31 +90,35 @@ const LAST_PLAY_KEY = 'entropyReduction_lastPlay';
  * @returns {object} - { streak: number, lastPlayDate: string|null, streakAlive: boolean }
  */
 export function getStreakData() {
-  const streak = parseInt(localStorage.getItem(STREAK_KEY) || '0', 10);
-  const lastPlay = localStorage.getItem(LAST_PLAY_KEY);
+  try {
+    const streak = parseInt(localStorage.getItem(STREAK_KEY) || '0', 10);
+    const lastPlay = localStorage.getItem(LAST_PLAY_KEY);
 
-  if (!lastPlay) {
+    if (!lastPlay) {
+      return { streak: 0, lastPlayDate: null, streakAlive: true };
+    }
+
+    const lastDate = new Date(lastPlay);
+    const today = new Date();
+
+    // Reset time to compare dates only
+    lastDate.setHours(0, 0, 0, 0);
+    today.setHours(0, 0, 0, 0);
+
+    const diffDays = Math.floor((today - lastDate) / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) {
+      // Already played today
+      return { streak, lastPlayDate: lastPlay, streakAlive: true, playedToday: true };
+    } else if (diffDays === 1) {
+      // Streak can be extended
+      return { streak, lastPlayDate: lastPlay, streakAlive: true, playedToday: false };
+    } else {
+      // Streak is broken
+      return { streak: 0, lastPlayDate: lastPlay, streakAlive: false, playedToday: false };
+    }
+  } catch {
     return { streak: 0, lastPlayDate: null, streakAlive: true };
-  }
-
-  const lastDate = new Date(lastPlay);
-  const today = new Date();
-
-  // Reset time to compare dates only
-  lastDate.setHours(0, 0, 0, 0);
-  today.setHours(0, 0, 0, 0);
-
-  const diffDays = Math.floor((today - lastDate) / (1000 * 60 * 60 * 24));
-
-  if (diffDays === 0) {
-    // Already played today
-    return { streak, lastPlayDate: lastPlay, streakAlive: true, playedToday: true };
-  } else if (diffDays === 1) {
-    // Streak can be extended
-    return { streak, lastPlayDate: lastPlay, streakAlive: true, playedToday: false };
-  } else {
-    // Streak is broken
-    return { streak: 0, lastPlayDate: lastPlay, streakAlive: false, playedToday: false };
   }
 }
 
@@ -113,20 +128,24 @@ export function getStreakData() {
  * @returns {object} - Updated streak data
  */
 export function recordPlay() {
-  const { streak, streakAlive, playedToday } = getStreakData();
-  const today = new Date().toISOString();
+  try {
+    const { streak, streakAlive, playedToday } = getStreakData();
+    const today = new Date().toISOString();
 
-  if (playedToday) {
-    // Already played today, don't update streak
-    return { streak, isNewDay: false };
+    if (playedToday) {
+      // Already played today, don't update streak
+      return { streak, isNewDay: false };
+    }
+
+    const newStreak = streakAlive ? streak + 1 : 1;
+
+    localStorage.setItem(STREAK_KEY, newStreak.toString());
+    localStorage.setItem(LAST_PLAY_KEY, today);
+
+    return { streak: newStreak, isNewDay: true };
+  } catch {
+    return { streak: 0, isNewDay: false };
   }
-
-  const newStreak = streakAlive ? streak + 1 : 1;
-
-  localStorage.setItem(STREAK_KEY, newStreak.toString());
-  localStorage.setItem(LAST_PLAY_KEY, today);
-
-  return { streak: newStreak, isNewDay: true };
 }
 
 // ============================================
@@ -149,10 +168,11 @@ export function rollForCriticalClear() {
  *
  * @param {number} basePoints - Base points for this action
  * @param {number} comboCount - Current combo multiplier
+ * @param {number} cascadeLevel - Current cascade level (0 for first clear)
  * @param {boolean} isCritical - Whether this is a critical clear
  * @returns {object} - { points, isCritical, message }
  */
-export function calculateReward(basePoints, comboCount, isCritical = null) {
+export function calculateReward(basePoints, comboCount, cascadeLevel = 0, isCritical = null) {
   // Roll for critical if not explicitly set
   if (isCritical === null) {
     isCritical = rollForCriticalClear();
@@ -165,13 +185,28 @@ export function calculateReward(basePoints, comboCount, isCritical = null) {
     points *= Math.pow(GAME_CONFIG.COMBO_MULTIPLIER, comboCount - 1);
   }
 
+  // Apply cascade bonus
+  if (cascadeLevel > 0) {
+    points *= Math.pow(GAME_CONFIG.CASCADE_BONUS, cascadeLevel);
+  }
+
   // Apply critical multiplier (POSITIVE PREDICTION ERROR)
   if (isCritical) {
     points *= GAME_CONFIG.CRITICAL_MULTIPLIER;
     return {
       points: Math.floor(points),
       isCritical: true,
-      message: 'CRITICAL CLEAR!',
+      message: cascadeLevel > 0 ? `CASCADE CRITICAL x${cascadeLevel + 1}!` : 'CRITICAL CLEAR!',
+    };
+  }
+
+  // Special messages for cascades
+  if (cascadeLevel > 0) {
+    const cascadeMessages = ['CHAIN!', 'DOUBLE CHAIN!', 'TRIPLE CHAIN!', 'MEGA CHAIN!', 'ULTRA CHAIN!'];
+    return {
+      points: Math.floor(points),
+      isCritical: false,
+      message: cascadeMessages[Math.min(cascadeLevel - 1, cascadeMessages.length - 1)],
     };
   }
 
@@ -201,8 +236,8 @@ export function detectNearMiss(completionPercentage) {
 /**
  * Calculates completion percentage for near-miss detection
  *
- * @param {Array} tiles - Current tile state
- * @param {number} targetClears - Number of clears needed for success
+ * @param {number} clearedCount - Number of clears
+ * @param {number} targetCount - Number of clears needed for success
  * @returns {number} - Completion percentage (0-1)
  */
 export function calculateCompletionPercentage(clearedCount, targetCount) {
@@ -334,6 +369,20 @@ export function updateCombo(currentCombo, successful, timeSinceLastClear = 0) {
 // ============================================
 
 /**
+ * Creates a grid map for quick tile lookup
+ * @param {Array} tiles - Array of tile objects
+ * @returns {Object} - Grid map with "x,y" keys
+ */
+export function createGridMap(tiles) {
+  const grid = {};
+  tiles.forEach(tile => {
+    const key = `${tile.x},${tile.y}`;
+    grid[key] = tile;
+  });
+  return grid;
+}
+
+/**
  * Finds all tiles that are part of the same match group as the clicked tile
  * Returns all connected tiles in horizontal and vertical matches
  *
@@ -347,13 +396,7 @@ export function findMatchingGroup(tiles, clickedTileId, gridSize) {
   if (!clickedTile) return [];
 
   const matchingIds = new Set();
-
-  // Create grid map for quick lookup
-  const grid = {};
-  tiles.forEach(tile => {
-    const key = `${tile.x},${tile.y}`;
-    grid[key] = tile;
-  });
+  const grid = createGridMap(tiles);
 
   // Find horizontal match containing clicked tile
   const horizontalMatch = [];
@@ -420,13 +463,7 @@ export function findMatchingGroup(tiles, clickedTileId, gridSize) {
  */
 export function findClearableTiles(tiles, gridSize) {
   const clearable = new Set();
-
-  // Create grid map for quick lookup
-  const grid = {};
-  tiles.forEach(tile => {
-    const key = `${tile.x},${tile.y}`;
-    grid[key] = tile;
-  });
+  const grid = createGridMap(tiles);
 
   // Check horizontal matches
   for (let y = 0; y < gridSize; y++) {
@@ -501,4 +538,181 @@ export function findClearableTiles(tiles, gridSize) {
   }
 
   return Array.from(clearable);
+}
+
+// ============================================
+// GRAVITY SYSTEM
+// ============================================
+
+/**
+ * Applies gravity to tiles - makes tiles fall down to fill gaps
+ * Returns the new tile positions and fall information
+ *
+ * @param {Array} tiles - Current tiles array
+ * @param {number} gridSize - Size of the grid
+ * @returns {Object} - { newTiles, fallAnimations }
+ */
+export function applyGravity(tiles, gridSize) {
+  // Create a copy of tiles to modify
+  const newTiles = tiles.map(t => ({ ...t }));
+  const fallAnimations = []; // Track which tiles need fall animation
+
+  // Process each column from bottom to top
+  for (let x = 0; x < gridSize; x++) {
+    // Get all tiles in this column, sorted by y position (bottom first)
+    const columnTiles = newTiles
+      .filter(t => t.x === x)
+      .sort((a, b) => b.y - a.y); // Sort descending (bottom first)
+
+    // Find empty positions in this column
+    const occupiedY = new Set(columnTiles.map(t => t.y));
+    const emptyPositions = [];
+    for (let y = gridSize - 1; y >= 0; y--) {
+      if (!occupiedY.has(y)) {
+        emptyPositions.push(y);
+      }
+    }
+
+    // Move tiles down to fill gaps
+    if (emptyPositions.length > 0) {
+      // Sort empty positions descending (fill from bottom)
+      emptyPositions.sort((a, b) => b - a);
+
+      // For each tile (from bottom to top), check if it needs to fall
+      for (const tile of columnTiles) {
+        // Count how many empty positions are below this tile
+        const emptyBelow = emptyPositions.filter(y => y > tile.y).length;
+
+        if (emptyBelow > 0) {
+          const oldY = tile.y;
+          const newY = tile.y + emptyBelow;
+
+          // Record the fall animation
+          fallAnimations.push({
+            tileId: tile.id,
+            fromY: oldY,
+            toY: newY,
+            distance: emptyBelow,
+          });
+
+          // Update tile position
+          tile.y = newY;
+        }
+      }
+    }
+  }
+
+  return { newTiles, fallAnimations };
+}
+
+/**
+ * Checks if there are any matches after gravity is applied
+ * Used for cascade detection
+ *
+ * @param {Array} tiles - Tiles after gravity
+ * @param {number} gridSize - Size of grid
+ * @returns {Array} - Array of all tile IDs that form matches
+ */
+export function findAllMatches(tiles, gridSize) {
+  return findClearableTiles(tiles, gridSize);
+}
+
+/**
+ * Processes a complete cascade sequence
+ * Returns all the steps needed for animation
+ *
+ * @param {Array} initialTiles - Starting tiles
+ * @param {Array} tilesToClear - Tiles to clear in first step
+ * @param {number} gridSize - Size of grid
+ * @returns {Array} - Array of cascade steps: [{ clearedIds, newTiles, fallAnimations, newMatches }]
+ */
+export function processCascade(initialTiles, tilesToClear, gridSize) {
+  const cascadeSteps = [];
+  let currentTiles = [...initialTiles];
+  let currentClears = tilesToClear;
+
+  while (currentClears.length > 0) {
+    // Step 1: Remove cleared tiles
+    const remainingTiles = currentTiles.filter(t => !currentClears.includes(t.id));
+
+    // Step 2: Apply gravity
+    const { newTiles, fallAnimations } = applyGravity(remainingTiles, gridSize);
+
+    // Step 3: Find new matches (cascade)
+    const newMatches = findAllMatches(newTiles, gridSize);
+
+    // Record this cascade step
+    cascadeSteps.push({
+      clearedIds: currentClears,
+      tilesAfterClear: remainingTiles,
+      tilesAfterFall: newTiles,
+      fallAnimations,
+      newMatches,
+    });
+
+    // Prepare for next iteration
+    currentTiles = newTiles;
+    currentClears = newMatches;
+  }
+
+  return cascadeSteps;
+}
+
+// ============================================
+// SWIPE DETECTION
+// ============================================
+
+/**
+ * Determines swipe direction from touch delta
+ *
+ * @param {number} deltaX - Horizontal movement
+ * @param {number} deltaY - Vertical movement
+ * @param {number} threshold - Minimum distance to count as swipe
+ * @returns {string|null} - 'up', 'down', 'left', 'right', or null
+ */
+export function getSwipeDirection(deltaX, deltaY, threshold = 30) {
+  const absX = Math.abs(deltaX);
+  const absY = Math.abs(deltaY);
+
+  // Must exceed threshold
+  if (absX < threshold && absY < threshold) {
+    return null;
+  }
+
+  // Determine primary direction
+  if (absX > absY) {
+    return deltaX > 0 ? 'right' : 'left';
+  } else {
+    return deltaY > 0 ? 'down' : 'up';
+  }
+}
+
+/**
+ * Gets the adjacent tile in a given direction
+ *
+ * @param {Array} tiles - Current tiles
+ * @param {Object} fromTile - Starting tile
+ * @param {string} direction - 'up', 'down', 'left', 'right'
+ * @param {number} gridSize - Size of grid
+ * @returns {Object|null} - Adjacent tile or null
+ */
+export function getAdjacentTile(tiles, fromTile, direction, gridSize) {
+  let targetX = fromTile.x;
+  let targetY = fromTile.y;
+
+  switch (direction) {
+    case 'up': targetY--; break;
+    case 'down': targetY++; break;
+    case 'left': targetX--; break;
+    case 'right': targetX++; break;
+    default: return null;
+  }
+
+  // Check bounds
+  if (targetX < 0 || targetX >= gridSize || targetY < 0 || targetY >= gridSize) {
+    return null;
+  }
+
+  // Find tile at target position
+  return tiles.find(t => t.x === targetX && t.y === targetY) || null;
 }
