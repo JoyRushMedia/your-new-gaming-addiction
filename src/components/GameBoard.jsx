@@ -4,16 +4,16 @@ import Tile from './Tile';
 import ParticleBurst from './ParticleBurst';
 import {
   calculateReward,
-  detectNearMiss,
-  calculateCompletionPercentage,
   calculateEntropySpawn,
   generateRandomPosition,
   generateRandomTileType,
   calculateEntropyLevel,
   updateCombo,
   findClearableTiles,
+  findMatchingGroup,
   GAME_CONFIG,
 } from '../lib/gameLogic';
+import { soundManager } from '../lib/sounds';
 
 /**
  * GameBoard Component (JUICE-INJECTED)
@@ -31,7 +31,7 @@ const SPRING_CONFIG = {
   damping: 20,
 };
 
-export default function GameBoard() {
+export default function GameBoard({ onHome, onHelp }) {
   // ============================================
   // STATE MANAGEMENT
   // ============================================
@@ -42,10 +42,172 @@ export default function GameBoard() {
   const [entropyLevel, setEntropyLevel] = useState(0);
   const [lastClearTime, setLastClearTime] = useState(Date.now());
   const [isNearMiss, setIsNearMiss] = useState(false);
+  const [nearMissPercent, setNearMissPercent] = useState(0);
   const [criticalMessage, setCriticalMessage] = useState(null);
   const [shake, setShake] = useState(false);
   const [particleBursts, setParticleBursts] = useState([]);
+  const [isPaused, setIsPaused] = useState(false);
+  const [highScore, setHighScore] = useState(() => {
+    const saved = localStorage.getItem('entropyReduction_highScore');
+    return saved ? parseInt(saved, 10) : 0;
+  });
+  const [comboTimeLeft, setComboTimeLeft] = useState(0);
+  const [soundEnabled, setSoundEnabled] = useState(() => {
+    const saved = localStorage.getItem('entropyReduction_soundEnabled');
+    return saved !== 'false'; // Default to true
+  });
   const gameBoardRef = useRef(null);
+  const comboTimerRef = useRef(null);
+  const soundInitialized = useRef(false);
+
+  // ============================================
+  // COMBO TIMER
+  // ============================================
+
+  useEffect(() => {
+    if (combo > 0 && !isPaused) {
+      const COMBO_TIMEOUT = 3000;
+      const updateInterval = 50; // Update every 50ms for smooth animation
+
+      // Clear any existing timer
+      if (comboTimerRef.current) {
+        clearInterval(comboTimerRef.current);
+      }
+
+      const startTime = lastClearTime;
+      setComboTimeLeft(100);
+
+      comboTimerRef.current = setInterval(() => {
+        const elapsed = Date.now() - startTime;
+        const remaining = Math.max(0, ((COMBO_TIMEOUT - elapsed) / COMBO_TIMEOUT) * 100);
+        setComboTimeLeft(remaining);
+
+        if (remaining === 0) {
+          clearInterval(comboTimerRef.current);
+          setCombo(0);
+        }
+      }, updateInterval);
+
+      return () => {
+        if (comboTimerRef.current) {
+          clearInterval(comboTimerRef.current);
+        }
+      };
+    } else {
+      setComboTimeLeft(0);
+    }
+  }, [combo, lastClearTime, isPaused]);
+
+  // ============================================
+  // HIGH SCORE PERSISTENCE
+  // ============================================
+
+  useEffect(() => {
+    if (score > highScore) {
+      setHighScore(score);
+      localStorage.setItem('entropyReduction_highScore', score.toString());
+    }
+  }, [score, highScore]);
+
+  // ============================================
+  // SOUND MANAGEMENT
+  // ============================================
+
+  const initSound = useCallback(() => {
+    if (!soundInitialized.current) {
+      soundManager.init();
+      soundManager.setEnabled(soundEnabled);
+      soundInitialized.current = true;
+    }
+  }, [soundEnabled]);
+
+  const toggleSound = useCallback(() => {
+    const newEnabled = !soundEnabled;
+    setSoundEnabled(newEnabled);
+    soundManager.setEnabled(newEnabled);
+    localStorage.setItem('entropyReduction_soundEnabled', newEnabled.toString());
+  }, [soundEnabled]);
+
+  // Sync sound enabled state
+  useEffect(() => {
+    soundManager.setEnabled(soundEnabled);
+  }, [soundEnabled]);
+
+  // ============================================
+  // RESTART GAME
+  // ============================================
+
+  const restartGame = useCallback(() => {
+    // Reset tile ID counter
+    tileIdCounter = 0;
+
+    // Generate new initial tiles
+    const initialTiles = [];
+    for (let i = 0; i < 12; i++) {
+      const position = generateRandomPosition(GRID_SIZE, initialTiles);
+      if (position) {
+        initialTiles.push({
+          id: tileIdCounter++,
+          x: position.x,
+          y: position.y,
+          type: generateRandomTileType(),
+        });
+      }
+    }
+
+    // Reset all state
+    setTiles(initialTiles);
+    setScore(0);
+    setCombo(0);
+    setEntropyLevel(0);
+    setLastClearTime(Date.now());
+    setIsNearMiss(false);
+    setCriticalMessage(null);
+    setShake(false);
+    setParticleBursts([]);
+    setIsPaused(false);
+    setComboTimeLeft(0);
+  }, []);
+
+  // ============================================
+  // PAUSE TOGGLE
+  // ============================================
+
+  const togglePause = useCallback(() => {
+    setIsPaused(prev => !prev);
+  }, []);
+
+  // ============================================
+  // KEYBOARD SHORTCUTS
+  // ============================================
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Don't trigger if user is typing in an input
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      switch (e.code) {
+        case 'Space':
+        case 'Escape':
+          e.preventDefault();
+          togglePause();
+          break;
+        case 'KeyR':
+          e.preventDefault();
+          restartGame();
+          break;
+        case 'KeyH':
+          e.preventDefault();
+          if (onHelp) onHelp();
+          break;
+        default:
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [togglePause, restartGame, onHelp]);
 
   // ============================================
   // INITIALIZATION
@@ -82,7 +244,8 @@ export default function GameBoard() {
   // ============================================
 
   useEffect(() => {
-    if (tiles.length >= GRID_SIZE * GRID_SIZE - 4) return;
+    // Don't spawn when paused or board is nearly full
+    if (isPaused || tiles.length >= GRID_SIZE * GRID_SIZE - 4) return;
 
     const spawnTimer = setTimeout(() => {
       const spawnCount = calculateEntropySpawn(tiles.length, GRID_SIZE);
@@ -108,55 +271,89 @@ export default function GameBoard() {
     }, GAME_CONFIG.ENTROPY_SPAWN_DELAY);
 
     return () => clearTimeout(spawnTimer);
-  }, [tiles]);
+  }, [tiles, isPaused]);
 
   // ============================================
   // CLEAR MECHANICS
   // ============================================
 
   const handleTileClear = useCallback((tileId) => {
+    // Initialize sound on first user interaction
+    initSound();
+
     const now = Date.now();
     const timeSinceLastClear = now - lastClearTime;
 
-    // Get tile position for particle burst
+    // Find ALL tiles in the matching group (not just the clicked one)
+    const matchingTileIds = findMatchingGroup(tiles, tileId, GRID_SIZE);
+
+    if (matchingTileIds.length === 0) return;
+
+    // Get clicked tile position for particle burst
     const clearedTile = tiles.find(t => t.id === tileId);
     const tileElement = document.querySelector(`[data-tile-id="${tileId}"]`);
 
-    // FIXED: Near-miss detection - check if this was the LAST clearable tile
-    // but there are still other tiles remaining (chaos persists)
-    const remainingClearableAfterThis = clearableTileIds.filter(id => id !== tileId);
-    const totalTilesAfterClear = tiles.length - 1;
+    // Calculate remaining tiles for near-miss detection
+    const remainingTilesAfterClear = tiles.filter(t => !matchingTileIds.includes(t.id));
+    const remainingClearableAfterClear = findClearableTiles(remainingTilesAfterClear, GRID_SIZE);
 
-    // Near-miss = Just cleared last clearable tile, but board still has 15%+ entropy
-    const isLastClearable = remainingClearableAfterThis.length === 0;
-    const hasSignificantEntropy = totalTilesAfterClear >= (GRID_SIZE * GRID_SIZE) * 0.15;
+    // Near-miss = No more clearable tiles after this, but board still has 15%+ entropy
+    const isLastClearable = remainingClearableAfterClear.length === 0;
+    const hasSignificantEntropy = remainingTilesAfterClear.length >= (GRID_SIZE * GRID_SIZE) * 0.15;
+    const entropyPercentage = Math.round((remainingTilesAfterClear.length / (GRID_SIZE * GRID_SIZE)) * 100);
 
     if (isLastClearable && hasSignificantEntropy) {
       setIsNearMiss(true);
-      setShake(true); // SHAKE on near-miss
+      setNearMissPercent(entropyPercentage);
+      setShake(true);
+      soundManager.playNearMiss();
       setTimeout(() => {
         setIsNearMiss(false);
         setShake(false);
       }, 800);
     }
 
-    setTiles(prev => {
-      const newTiles = prev.filter(t => t.id !== tileId);
-      return newTiles;
-    });
+    // Clear ALL matching tiles at once
+    setTiles(prev => prev.filter(t => !matchingTileIds.includes(t.id)));
 
     // Update combo
     const newCombo = updateCombo(combo, true, timeSinceLastClear);
     setCombo(newCombo);
 
-    // Calculate reward with Variable Ratio Schedule
+    // Play combo sound if combo increased
+    if (newCombo > 1) {
+      soundManager.playCombo(newCombo);
+    }
+
+    // Calculate reward - bonus points for clearing more tiles!
+    const tilesCleared = matchingTileIds.length;
+    const basePoints = GAME_CONFIG.BASE_POINTS_PER_CLEAR * tilesCleared;
+    // Bonus multiplier for clearing 4+ tiles (match-4, match-5, etc.)
+    const matchBonus = tilesCleared > 3 ? 1 + (tilesCleared - 3) * 0.5 : 1;
+
     const reward = calculateReward(
-      GAME_CONFIG.BASE_POINTS_PER_CLEAR,
+      Math.floor(basePoints * matchBonus),
       newCombo
     );
 
     setScore(prev => prev + reward.points);
     setLastClearTime(now);
+
+    // Play appropriate sound based on clear type
+    if (reward.isCritical) {
+      soundManager.playCritical();
+    } else if (tilesCleared >= 4) {
+      soundManager.playBigClear();
+    } else {
+      // Normal clear with pitch based on tiles cleared
+      soundManager.playClear(1 + (tilesCleared - 3) * 0.2);
+    }
+
+    // Show clear message for big clears
+    if (tilesCleared >= 4 && !reward.isCritical) {
+      setCriticalMessage(tilesCleared >= 5 ? 'MASSIVE CLEAR!' : 'GREAT CLEAR!');
+      setTimeout(() => setCriticalMessage(null), 800);
+    }
 
     // CRITICAL CLEAR FEEDBACK
     if (reward.isCritical) {
@@ -191,7 +388,7 @@ export default function GameBoard() {
         setShake(false);
       }, 1000);
     }
-  }, [combo, lastClearTime, tiles]);
+  }, [combo, lastClearTime, tiles, initSound]);
 
   // ============================================
   // AUTO-CLEAR DETECTION
@@ -222,8 +419,8 @@ export default function GameBoard() {
         transition={{ duration: 0.4 }}
       >
         {/* Header Stats */}
-        <div className="flex justify-between items-start mb-8 gap-6">
-          {/* Score */}
+        <div className="flex justify-between items-start mb-8 gap-4">
+          {/* Score + High Score */}
           <motion.div
             className="chamfer-sm bg-void-surface border-2 border-neon-cyan p-4 min-w-[200px] relative"
             style={{
@@ -235,7 +432,12 @@ export default function GameBoard() {
             }}
             transition={SPRING_CONFIG}
           >
-            <div className="text-header text-neon-cyan text-sm mb-1">SCORE</div>
+            <div className="flex justify-between items-center mb-1">
+              <div className="text-header text-neon-cyan text-sm">SCORE</div>
+              <div className="text-header text-text-muted text-xs">
+                BEST: {highScore.toLocaleString()}
+              </div>
+            </div>
             <motion.div
               className="text-score text-4xl text-white"
               key={score}
@@ -247,14 +449,14 @@ export default function GameBoard() {
             </motion.div>
           </motion.div>
 
-          {/* Combo */}
+          {/* Combo with Timer */}
           <motion.div
             className={`
               chamfer-sm bg-void-surface border-2 p-4 min-w-[150px]
             `}
             style={{
-              borderColor: combo > 1 ? '#ffb000' : '#1a1a28',
-              boxShadow: combo > 1
+              borderColor: combo > 0 ? '#ffb000' : '#1a1a28',
+              boxShadow: combo > 0
                 ? '0 0 30px #ffb000, inset 0 0 20px rgba(255, 176, 0, 0.2)'
                 : 'none',
             }}
@@ -276,12 +478,23 @@ export default function GameBoard() {
                 {combo > 0 ? `x${combo}` : '--'}
               </motion.div>
             </AnimatePresence>
+            {/* Combo Timer Bar */}
+            <div className="mt-2 h-1 bg-void-deep rounded-full overflow-hidden">
+              <motion.div
+                className="h-full"
+                style={{
+                  backgroundColor: comboTimeLeft > 30 ? '#ffb000' : '#ff3366',
+                }}
+                animate={{ width: `${comboTimeLeft}%` }}
+                transition={{ duration: 0.05 }}
+              />
+            </div>
           </motion.div>
 
           {/* Entropy Level */}
           <motion.div
             className={`
-              chamfer-sm bg-void-surface border-2 p-4 min-w-[200px]
+              chamfer-sm bg-void-surface border-2 p-4 min-w-[180px]
             `}
             style={{
               borderColor: entropyLevel > 70 ? '#ff3366' : '#1a1a28',
@@ -317,6 +530,69 @@ export default function GameBoard() {
               </div>
             </div>
           </motion.div>
+
+          {/* Control Buttons */}
+          <div className="flex flex-wrap gap-2">
+            <motion.button
+              className={`
+                chamfer-sm px-3 py-2 border-2 font-rajdhani font-bold tracking-wider text-xs
+                ${isPaused
+                  ? 'bg-neon-amber border-neon-amber text-void-black'
+                  : 'bg-void-surface border-void-border text-text-muted hover:border-neon-cyan hover:text-neon-cyan'
+                }
+              `}
+              style={{
+                boxShadow: isPaused ? '0 0 20px #ffb000' : 'none',
+              }}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={togglePause}
+            >
+              {isPaused ? 'RESUME' : 'PAUSE'}
+            </motion.button>
+            <motion.button
+              className="chamfer-sm bg-void-surface border-2 border-void-border px-3 py-2 text-text-muted font-rajdhani font-bold tracking-wider text-xs hover:border-chaos hover:text-chaos"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={restartGame}
+            >
+              RESTART
+            </motion.button>
+            <motion.button
+              className={`
+                chamfer-sm px-3 py-2 border-2 font-rajdhani font-bold tracking-wider text-xs
+                ${soundEnabled
+                  ? 'bg-void-surface border-order text-order'
+                  : 'bg-void-surface border-void-border text-text-muted'
+                }
+              `}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => {
+                initSound();
+                toggleSound();
+              }}
+              title={soundEnabled ? 'Sound On' : 'Sound Off'}
+            >
+              {soundEnabled ? '♪ ON' : '♪ OFF'}
+            </motion.button>
+            <motion.button
+              className="chamfer-sm bg-void-surface border-2 border-void-border px-3 py-2 text-text-muted font-rajdhani font-bold tracking-wider text-xs hover:border-neon-violet hover:text-neon-violet"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={onHelp}
+            >
+              HELP
+            </motion.button>
+            <motion.button
+              className="chamfer-sm bg-void-surface border-2 border-void-border px-3 py-2 text-text-muted font-rajdhani font-bold tracking-wider text-xs hover:border-neon-magenta hover:text-neon-magenta"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={onHome}
+            >
+              HOME
+            </motion.button>
+          </div>
         </div>
 
         {/* Critical Message Overlay */}
@@ -378,8 +654,47 @@ export default function GameBoard() {
                   boxShadow: '0 0 40px #ff00ff, inset 0 0 20px rgba(255, 0, 255, 0.3)',
                 }}
               >
-                SO CLOSE! 85% COMPLETE
+                SO CLOSE! {nearMissPercent}% ENTROPY REMAINS
               </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Pause Overlay */}
+        <AnimatePresence>
+          {isPaused && (
+            <motion.div
+              className="fixed inset-0 bg-void-black/80 flex items-center justify-center z-50"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+            >
+              <motion.div
+                className="text-center"
+                initial={{ scale: 0.8, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.8, y: 20 }}
+              >
+                <div
+                  className="text-impact text-6xl text-neon-cyan mb-4"
+                  style={{ textShadow: '0 0 40px #00f0ff' }}
+                >
+                  PAUSED
+                </div>
+                <div className="text-header text-text-muted text-lg mb-8">
+                  ENTROPY GENERATION HALTED
+                </div>
+                <motion.button
+                  className="chamfer-sm bg-neon-cyan text-void-black px-8 py-4 font-rajdhani font-bold text-xl tracking-wider"
+                  style={{ boxShadow: '0 0 30px #00f0ff' }}
+                  whileHover={{ scale: 1.05, boxShadow: '0 0 50px #00f0ff' }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={togglePause}
+                >
+                  RESUME
+                </motion.button>
+              </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -446,8 +761,15 @@ export default function GameBoard() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5 }}
         >
-          <p className="tracking-moderate">
+          <p className="tracking-moderate mb-2">
             CLICK TILES TO CLEAR • MATCH 3+ TO REDUCE ENTROPY
+          </p>
+          <p className="text-xs opacity-60">
+            <span className="text-neon-cyan">[SPACE]</span> Pause
+            <span className="mx-2">•</span>
+            <span className="text-neon-cyan">[R]</span> Restart
+            <span className="mx-2">•</span>
+            <span className="text-neon-cyan">[ESC]</span> Pause
           </p>
         </motion.div>
       </motion.div>

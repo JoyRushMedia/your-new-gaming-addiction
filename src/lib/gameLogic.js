@@ -234,6 +234,83 @@ export function updateCombo(currentCombo, successful, timeSinceLastClear = 0) {
 // ============================================
 
 /**
+ * Finds all tiles that are part of the same match group as the clicked tile
+ * Returns all connected tiles in horizontal and vertical matches
+ *
+ * @param {Array} tiles - Array of tile objects with {x, y, type, id}
+ * @param {number} clickedTileId - ID of the tile that was clicked
+ * @param {number} gridSize - Size of grid
+ * @returns {Array} - Array of tile IDs to clear (including clicked tile)
+ */
+export function findMatchingGroup(tiles, clickedTileId, gridSize) {
+  const clickedTile = tiles.find(t => t.id === clickedTileId);
+  if (!clickedTile) return [];
+
+  const matchingIds = new Set();
+
+  // Create grid map for quick lookup
+  const grid = {};
+  tiles.forEach(tile => {
+    const key = `${tile.x},${tile.y}`;
+    grid[key] = tile;
+  });
+
+  // Find horizontal match containing clicked tile
+  const horizontalMatch = [];
+  // Scan left
+  for (let x = clickedTile.x; x >= 0; x--) {
+    const tile = grid[`${x},${clickedTile.y}`];
+    if (tile && tile.type === clickedTile.type) {
+      horizontalMatch.push(tile);
+    } else {
+      break;
+    }
+  }
+  // Scan right (skip clicked tile position, already added)
+  for (let x = clickedTile.x + 1; x < gridSize; x++) {
+    const tile = grid[`${x},${clickedTile.y}`];
+    if (tile && tile.type === clickedTile.type) {
+      horizontalMatch.push(tile);
+    } else {
+      break;
+    }
+  }
+
+  // Add horizontal match if 3+
+  if (horizontalMatch.length >= 3) {
+    horizontalMatch.forEach(t => matchingIds.add(t.id));
+  }
+
+  // Find vertical match containing clicked tile
+  const verticalMatch = [];
+  // Scan up
+  for (let y = clickedTile.y; y >= 0; y--) {
+    const tile = grid[`${clickedTile.x},${y}`];
+    if (tile && tile.type === clickedTile.type) {
+      verticalMatch.push(tile);
+    } else {
+      break;
+    }
+  }
+  // Scan down (skip clicked tile position, already added)
+  for (let y = clickedTile.y + 1; y < gridSize; y++) {
+    const tile = grid[`${clickedTile.x},${y}`];
+    if (tile && tile.type === clickedTile.type) {
+      verticalMatch.push(tile);
+    } else {
+      break;
+    }
+  }
+
+  // Add vertical match if 3+
+  if (verticalMatch.length >= 3) {
+    verticalMatch.forEach(t => matchingIds.add(t.id));
+  }
+
+  return Array.from(matchingIds);
+}
+
+/**
  * Checks if tiles can be cleared (matched)
  * Simple match-3 style logic for demonstration
  *
