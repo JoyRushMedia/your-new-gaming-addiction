@@ -2,8 +2,8 @@ import { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 
 /**
- * Tile Component - ENHANCED VISUAL DESIGN
- * Features: Geometric icons, gradients, depth, glow effects, drag/swipe support
+ * Tile Component - POLISHED FOR SMOOTH GAMEPLAY
+ * Features: Spring-animated positions, responsive interactions, snappy feedback
  */
 
 // Enhanced tile configurations with icons and gradients
@@ -106,10 +106,17 @@ const TileIcon = ({ type, color, size = 28 }) => {
   return icons[type] || icons.bolt;
 };
 
-// Spring physics configuration
-const SPRING_CONFIG = {
+// Snappy spring physics for responsive feel
+const POSITION_SPRING = {
   type: 'spring',
-  stiffness: 400,
+  stiffness: 700,
+  damping: 35,
+  mass: 0.8,
+};
+
+const SCALE_SPRING = {
+  type: 'spring',
+  stiffness: 500,
   damping: 25,
 };
 
@@ -120,8 +127,9 @@ export default function Tile({
   isClearable,
   isSelected = false,
   cellSize = 60,
-  isNew = false, // Flag for newly spawned tiles
-  spawnDelay = 0, // Stagger spawn animations
+  gridGap = 4,
+  isNew = false,
+  isSwapping = false,
 }) {
   const [isHovered, setIsHovered] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -131,29 +139,13 @@ export default function Tile({
   const config = TILE_CONFIG[tile.type] || TILE_CONFIG.cyan;
   const iconSize = Math.max(24, cellSize * 0.5);
 
-  // Spawn animation: scale and fade for new tiles (no y offset to avoid overlap)
-  const spawnAnimation = isNew
-    ? {
-        initial: { scale: 0, opacity: 0 },
-        animate: { scale: 1, opacity: 1 },
-        transition: {
-          type: 'spring',
-          stiffness: 400,
-          damping: 20,
-          delay: spawnDelay,
-        },
-      }
-    : {
-        initial: { scale: 0.8, opacity: 0 },
-        animate: { scale: 1, opacity: 1 },
-        transition: SPRING_CONFIG,
-      };
+  // Calculate pixel position from grid coordinates
+  const pixelX = tile.x * (cellSize + gridGap);
+  const pixelY = tile.y * (cellSize + gridGap);
 
   // Handle click/tap - clear if clearable
   const handleClick = () => {
-    // Don't trigger click if we just finished dragging
     if (isDragging) return;
-
     if (isClearable) {
       onClear(tile.id);
     }
@@ -161,7 +153,7 @@ export default function Tile({
 
   // Get swipe direction from delta
   const getSwipeDirection = (deltaX, deltaY) => {
-    const threshold = cellSize * 0.3; // 30% of cell size
+    const threshold = cellSize * 0.25; // Reduced threshold for quicker response
     const absX = Math.abs(deltaX);
     const absY = Math.abs(deltaY);
 
@@ -184,7 +176,7 @@ export default function Tile({
       const deltaX = moveEvent.clientX - dragStartRef.current.x;
       const deltaY = moveEvent.clientY - dragStartRef.current.y;
 
-      if (Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10) {
+      if (Math.abs(deltaX) > 8 || Math.abs(deltaY) > 8) {
         setIsDragging(true);
       }
     };
@@ -198,8 +190,7 @@ export default function Tile({
         onSwap(tile, direction);
       }
 
-      // Small delay before resetting drag state to prevent click
-      setTimeout(() => setIsDragging(false), 50);
+      setTimeout(() => setIsDragging(false), 30);
 
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
@@ -217,12 +208,12 @@ export default function Tile({
   };
 
   const handleTouchMove = (e) => {
-    e.preventDefault(); // Prevent scrolling
+    e.preventDefault();
     const touch = e.touches[0];
     const deltaX = touch.clientX - dragStartRef.current.x;
     const deltaY = touch.clientY - dragStartRef.current.y;
 
-    if (Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10) {
+    if (Math.abs(deltaX) > 8 || Math.abs(deltaY) > 8) {
       setIsDragging(true);
     }
   };
@@ -236,27 +227,37 @@ export default function Tile({
     if (direction && onSwap) {
       onSwap(tile, direction);
     } else if (!isDragging && isClearable) {
-      // If it was a tap (not a swipe), clear the tile
       onClear(tile.id);
     }
 
-    setTimeout(() => setIsDragging(false), 50);
+    setTimeout(() => setIsDragging(false), 30);
   };
 
   return (
     <motion.div
       ref={tileRef}
-      className="absolute inset-0 cursor-pointer select-none"
-      style={{ perspective: '200px' }}
-      initial={spawnAnimation.initial}
-      animate={spawnAnimation.animate}
-      exit={{
-        scale: [1, 1.2, 0],
-        opacity: [1, 0.8, 0],
+      className="absolute cursor-pointer select-none"
+      style={{
+        width: cellSize,
+        height: cellSize,
+        zIndex: isSwapping ? 10 : 1,
       }}
-      transition={spawnAnimation.transition}
-      whileHover={{ scale: 1.05 }}
-      whileTap={{ scale: 0.95 }}
+      // Animate position changes smoothly
+      initial={isNew ? { x: pixelX, y: pixelY, scale: 0, opacity: 0 } : { x: pixelX, y: pixelY }}
+      animate={{
+        x: pixelX,
+        y: pixelY,
+        scale: 1,
+        opacity: 1,
+      }}
+      exit={{
+        scale: 0,
+        opacity: 0,
+        transition: { duration: 0.15 },
+      }}
+      transition={POSITION_SPRING}
+      whileHover={{ scale: 1.08, transition: { duration: 0.1 } }}
+      whileTap={{ scale: 0.92, transition: { duration: 0.05 } }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onClick={handleClick}
@@ -276,8 +277,11 @@ export default function Tile({
             : isClearable
               ? `0 0 ${isHovered ? '25px' : '15px'} ${config.glowColor}, ${config.shadowInner}, 0 4px 8px rgba(0,0,0,0.4)`
               : `0 0 8px ${config.glowColor}40, ${config.shadowInner}, 0 2px 4px rgba(0,0,0,0.3)`,
-          transformStyle: 'preserve-3d',
         }}
+        animate={{
+          scale: isSwapping ? 1.05 : 1,
+        }}
+        transition={SCALE_SPRING}
       >
         {/* Top shine effect */}
         <div
@@ -296,11 +300,11 @@ export default function Tile({
               background: `radial-gradient(circle at 50% 50%, ${config.glowColor}30 0%, transparent 60%)`,
             }}
             animate={{
-              scale: [1, 1.2, 1],
-              opacity: [0.3, 0.6, 0.3],
+              scale: [1, 1.15, 1],
+              opacity: [0.3, 0.5, 0.3],
             }}
             transition={{
-              duration: 1.5,
+              duration: 1,
               repeat: Infinity,
               ease: 'easeInOut',
             }}
@@ -312,9 +316,8 @@ export default function Tile({
           <motion.div
             animate={{
               scale: isHovered ? 1.1 : 1,
-              rotate: isHovered ? [0, -5, 5, 0] : 0,
             }}
-            transition={{ duration: 0.3 }}
+            transition={{ duration: 0.15 }}
           >
             <TileIcon
               type={config.icon}
@@ -354,7 +357,7 @@ export default function Tile({
               opacity: [0.7, 1, 0.7],
             }}
             transition={{
-              duration: 0.5,
+              duration: 0.4,
               repeat: Infinity,
             }}
           />
@@ -368,11 +371,11 @@ export default function Tile({
               border: `2px solid ${config.glowColor}`,
             }}
             animate={{
-              opacity: [0.4, 0.8, 0.4],
+              opacity: [0.4, 0.7, 0.4],
               scale: [1, 1.02, 1],
             }}
             transition={{
-              duration: 1.2,
+              duration: 0.8,
               repeat: Infinity,
               ease: 'easeInOut',
             }}

@@ -39,10 +39,10 @@ export const GAME_CONFIG = {
   DIFFICULTY_RAMP_INTERVAL: 30000, // Increase difficulty every 30 seconds
   DIFFICULTY_RAMP_AMOUNT: 100,     // Reduce spawn delay by 100ms each interval
 
-  // Animation Timing
-  CLEAR_ANIMATION_MS: 300,
-  FALL_ANIMATION_MS: 250,
-  CASCADE_DELAY_MS: 100,
+  // Animation Timing - Optimized for snappy feel
+  CLEAR_ANIMATION_MS: 150,  // Faster clears
+  FALL_ANIMATION_MS: 120,   // Quick gravity
+  CASCADE_DELAY_MS: 50,     // Rapid cascade checks
 };
 
 // ============================================

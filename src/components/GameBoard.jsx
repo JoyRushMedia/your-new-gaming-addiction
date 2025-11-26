@@ -115,6 +115,7 @@ export default function GameBoard({
   const [gamePhase, setGamePhase] = useState(GAME_PHASE.IDLE);
   const cascadeLevelRef = useRef(0);
   const [selectedTile, setSelectedTile] = useState(null);
+  const [swappingTileIds, setSwappingTileIds] = useState(new Set()); // Track tiles being swapped
 
   // Level Mode State
   const [maxChain, setMaxChain] = useState(0); // Track max cascade chain
@@ -765,7 +766,8 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
     const targetTile = tiles.find(t => t.x === targetX && t.y === targetY);
     if (!targetTile) return;
 
-    // Perform swap
+    // Mark tiles as swapping for visual feedback
+    setSwappingTileIds(new Set([tile.id, targetTile.id]));
     setGamePhase(GAME_PHASE.SWAPPING);
 
     const swappedTiles = tiles.map(t => {
@@ -794,18 +796,21 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
       if (newCombo > 1) soundManager.playCombo(newCombo);
       setLastClearTime(now);
 
+      // Quick timing for responsive feel
       setTimeout(() => {
+        setSwappingTileIds(new Set());
         processCascadeStep(matches, 0);
-      }, 150);
+      }, 80);
     } else {
-      // Invalid swap - animate back
+      // Invalid swap - animate back quickly
       setTiles(swappedTiles);
       soundManager.playNearMiss();
 
       setTimeout(() => {
         setTiles(tiles); // Revert
+        setSwappingTileIds(new Set());
         setGamePhase(GAME_PHASE.IDLE);
-      }, 200);
+      }, 120);
     }
   }, [tiles, isGameOver, gamePhase, initSound, lastClearTime, combo, maxCombo, processCascadeStep]);
 
@@ -1195,6 +1200,7 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
         {/* Game Board - RESPONSIVE */}
         <div ref={containerRef} className="flex-1 flex items-center justify-center min-h-0">
           <motion.div
+            ref={gameBoardRef}
             className="relative bg-void-deep/90 border-2 border-neon-cyan rounded-xl p-2"
             style={{
               boxShadow: isNearMiss
@@ -1204,45 +1210,48 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
               height: gridPixelSize + 16,
             }}
           >
-            {/* Grid */}
+            {/* Grid Background - Static cells for visual reference */}
             <div
-              className="grid relative overflow-hidden"
+              className="grid absolute inset-2"
               style={{
                 gridTemplateColumns: `repeat(${GRID_SIZE}, ${cellSize}px)`,
                 gridTemplateRows: `repeat(${GRID_SIZE}, ${cellSize}px)`,
                 gap: '4px',
               }}
             >
-              {Array.from({ length: GRID_SIZE * GRID_SIZE }).map((_, index) => {
-                const x = index % GRID_SIZE;
-                const y = Math.floor(index / GRID_SIZE);
-                const tile = tiles.find(t => t.x === x && t.y === y);
+              {Array.from({ length: GRID_SIZE * GRID_SIZE }).map((_, index) => (
+                <div
+                  key={`bg-cell-${index}`}
+                  className="bg-void-surface/30 rounded-lg"
+                  style={{ width: cellSize, height: cellSize }}
+                />
+              ))}
+            </div>
 
-                return (
-                  <div
-                    key={`cell-${x}-${y}`}
-                    className="relative bg-void-surface/30 rounded-lg overflow-hidden"
-                    style={{ width: cellSize, height: cellSize }}
-                    data-tile-id={tile?.id}
-                  >
-                    <AnimatePresence mode="popLayout">
-                      {tile && (
-                        <Tile
-                          key={tile.id}
-                          tile={tile}
-                          onClear={handleTileClear}
-                          onSwap={handleSwap}
-                          isClearable={clearableTileIds.includes(tile.id)}
-                          isSelected={selectedTile === tile.id}
-                          cellSize={cellSize}
-                          isNew={newTileIds.has(tile.id)}
-                          spawnDelay={(tile.y * 0.05) + (tile.x * 0.02)}
-                        />
-                      )}
-                    </AnimatePresence>
-                  </div>
-                );
-              })}
+            {/* Tiles - Absolutely positioned for smooth animation */}
+            <div
+              className="relative"
+              style={{
+                width: gridPixelSize,
+                height: gridPixelSize,
+              }}
+            >
+              <AnimatePresence mode="popLayout">
+                {tiles.map(tile => (
+                  <Tile
+                    key={tile.id}
+                    tile={tile}
+                    onClear={handleTileClear}
+                    onSwap={handleSwap}
+                    isClearable={clearableTileIds.includes(tile.id)}
+                    isSelected={selectedTile === tile.id}
+                    cellSize={cellSize}
+                    gridGap={4}
+                    isNew={newTileIds.has(tile.id)}
+                    isSwapping={swappingTileIds.has(tile.id)}
+                  />
+                ))}
+              </AnimatePresence>
             </div>
           </motion.div>
         </div>
