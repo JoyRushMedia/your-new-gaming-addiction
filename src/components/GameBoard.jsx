@@ -22,23 +22,16 @@ import {
 import { soundManager } from '../lib/sounds';
 
 /**
- * GameBoard Component - ENHANCED WITH GRAVITY & CASCADE
- * Features: Gravity system, chain reactions, touch/swipe support, enhanced visuals
+ * GameBoard Component - ENHANCED WITH GRAVITY, CASCADE & SWAP MECHANICS
+ * Features: Responsive grid, gravity, chain reactions, swipe/drag to swap
  */
 
 const GRID_SIZE = 6;
 let tileIdCounter = 0;
 
-// Spring physics for stat displays
-const SPRING_CONFIG = {
-  type: 'spring',
-  stiffness: 300,
-  damping: 20,
-};
-
-// Game phases for cascade animation
 const GAME_PHASE = {
   IDLE: 'idle',
+  SWAPPING: 'swapping',
   CLEARING: 'clearing',
   FALLING: 'falling',
   CASCADE_CHECK: 'cascade_check',
@@ -72,7 +65,7 @@ export default function GameBoard({ onHome, onHelp }) {
   const [soundEnabled, setSoundEnabled] = useState(() => {
     try {
       const saved = localStorage.getItem('entropyReduction_soundEnabled');
-      return saved !== 'false'; // Default to true
+      return saved !== 'false';
     } catch {
       return true;
     }
@@ -93,14 +86,43 @@ export default function GameBoard({ onHome, onHelp }) {
 
   // Cascade & Animation State
   const [gamePhase, setGamePhase] = useState(GAME_PHASE.IDLE);
-  const cascadeLevelRef = useRef(0); // Track cascade level for scoring
-  const [fallingTiles, setFallingTiles] = useState(new Set());
+  const cascadeLevelRef = useRef(0);
+  const [selectedTile, setSelectedTile] = useState(null);
+
+  // Responsive grid sizing
+  const [cellSize, setCellSize] = useState(70);
+  const containerRef = useRef(null);
 
   const gameBoardRef = useRef(null);
   const comboTimerRef = useRef(null);
   const soundInitialized = useRef(false);
   const lastDifficultyLevel = useRef(1);
   const spawnTimerRef = useRef(null);
+
+  // ============================================
+  // RESPONSIVE GRID SIZING
+  // ============================================
+
+  useEffect(() => {
+    const updateGridSize = () => {
+      if (!containerRef.current) return;
+
+      const container = containerRef.current;
+      const containerWidth = container.clientWidth;
+      const containerHeight = container.clientHeight;
+
+      // Calculate max cell size that fits
+      const maxCellWidth = Math.floor((containerWidth - 40) / GRID_SIZE);
+      const maxCellHeight = Math.floor((containerHeight - 40) / GRID_SIZE);
+      const newCellSize = Math.min(maxCellWidth, maxCellHeight, 90); // Max 90px
+
+      setCellSize(Math.max(50, newCellSize)); // Min 50px
+    };
+
+    updateGridSize();
+    window.addEventListener('resize', updateGridSize);
+    return () => window.removeEventListener('resize', updateGridSize);
+  }, []);
 
   // ============================================
   // MEMOIZED COMPUTATIONS
@@ -110,6 +132,8 @@ export default function GameBoard({ onHome, onHelp }) {
     if (gamePhase !== GAME_PHASE.IDLE) return [];
     return findClearableTiles(tiles, GRID_SIZE);
   }, [tiles, gamePhase]);
+
+  const gridPixelSize = cellSize * GRID_SIZE + (GRID_SIZE - 1) * 4; // cells + gaps
 
   // ============================================
   // GAME TIMER & DIFFICULTY PROGRESSION
@@ -141,8 +165,6 @@ export default function GameBoard({ onHome, onHelp }) {
     if (entropyLevel >= 100 && !isGameOver) {
       setIsGameOver(true);
       soundManager.playGameOver();
-
-      // Record play session for streak
       const { streak: newStreak } = recordPlay();
       setStreak(newStreak);
     }
@@ -195,7 +217,7 @@ export default function GameBoard({ onHome, onHelp }) {
       try {
         localStorage.setItem('entropyReduction_highScore', score.toString());
       } catch {
-        // Ignore localStorage errors
+        // Ignore
       }
     }
   }, [score, highScore]);
@@ -219,7 +241,7 @@ export default function GameBoard({ onHome, onHelp }) {
     try {
       localStorage.setItem('entropyReduction_soundEnabled', newEnabled.toString());
     } catch {
-      // Ignore localStorage errors
+      // Ignore
     }
   }, [soundEnabled]);
 
@@ -266,7 +288,7 @@ export default function GameBoard({ onHome, onHelp }) {
     setTilesCleared(0);
     setGamePhase(GAME_PHASE.IDLE);
     cascadeLevelRef.current = 0;
-    setFallingTiles(new Set());
+    setSelectedTile(null);
     lastDifficultyLevel.current = 1;
   }, []);
 
@@ -453,10 +475,8 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
       return;
     }
 
-    // Phase 1: Clear tiles
     setGamePhase(GAME_PHASE.CLEARING);
 
-    // Calculate points for this cascade step
     const basePoints = GAME_CONFIG.BASE_POINTS_PER_CLEAR * tilesToClear.length;
     const matchBonus = tilesToClear.length > 3 ? 1 + (tilesToClear.length - 3) * 0.5 : 1;
     const reward = calculateReward(
@@ -468,7 +488,6 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
     setScore(prev => prev + reward.points);
     setTilesCleared(prev => prev + tilesToClear.length);
 
-    // Show cascade message
     if (reward.message) {
       setCriticalMessage(reward.message);
       if (reward.isCritical) {
@@ -485,35 +504,23 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
       soundManager.playClear(1 + (tilesToClear.length - 3) * 0.2);
     }
 
-    // Remove cleared tiles after animation
     setTimeout(() => {
       setTiles(prevTiles => {
         const remainingTiles = prevTiles.filter(t => !tilesToClear.includes(t.id));
-
-        // Phase 2: Apply gravity
         setGamePhase(GAME_PHASE.FALLING);
-        const { newTiles, fallAnimations } = applyGravity(remainingTiles, GRID_SIZE);
+        const { newTiles } = applyGravity(remainingTiles, GRID_SIZE);
 
-        // Track falling tiles
-        setFallingTiles(new Set(fallAnimations.map(f => f.tileId)));
-
-        // After fall animation, check for cascades
         setTimeout(() => {
-          setFallingTiles(new Set());
           setTiles(newTiles);
-
-          // Phase 3: Check for new matches
           setGamePhase(GAME_PHASE.CASCADE_CHECK);
           const newMatches = findAllMatches(newTiles, GRID_SIZE);
 
           if (newMatches.length > 0) {
-            // Continue cascade
             cascadeLevelRef.current = currentCascadeLevel + 1;
             setTimeout(() => {
               processCascadeStep(newMatches, currentCascadeLevel + 1);
             }, GAME_CONFIG.CASCADE_DELAY_MS);
           } else {
-            // Cascade complete
             setGamePhase(GAME_PHASE.IDLE);
             cascadeLevelRef.current = 0;
           }
@@ -525,7 +532,81 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
   }, [combo]);
 
   // ============================================
-  // TILE CLEAR HANDLER
+  // SWAP HANDLER
+  // ============================================
+
+  const handleSwap = useCallback((tile, direction) => {
+    if (isGameOver || gamePhase !== GAME_PHASE.IDLE) return;
+
+    initSound();
+
+    // Find target position
+    let targetX = tile.x;
+    let targetY = tile.y;
+
+    switch (direction) {
+      case 'up': targetY--; break;
+      case 'down': targetY++; break;
+      case 'left': targetX--; break;
+      case 'right': targetX++; break;
+      default: return;
+    }
+
+    // Check bounds
+    if (targetX < 0 || targetX >= GRID_SIZE || targetY < 0 || targetY >= GRID_SIZE) {
+      return;
+    }
+
+    // Find target tile
+    const targetTile = tiles.find(t => t.x === targetX && t.y === targetY);
+    if (!targetTile) return;
+
+    // Perform swap
+    setGamePhase(GAME_PHASE.SWAPPING);
+
+    const swappedTiles = tiles.map(t => {
+      if (t.id === tile.id) {
+        return { ...t, x: targetX, y: targetY };
+      }
+      if (t.id === targetTile.id) {
+        return { ...t, x: tile.x, y: tile.y };
+      }
+      return t;
+    });
+
+    // Check if swap creates a match
+    const matches = findClearableTiles(swappedTiles, GRID_SIZE);
+
+    if (matches.length > 0) {
+      // Valid swap - keep it and start clearing
+      setTiles(swappedTiles);
+      soundManager.playClear(1);
+
+      const now = Date.now();
+      const timeSinceLastClear = now - lastClearTime;
+      const newCombo = updateCombo(combo, true, timeSinceLastClear);
+      setCombo(newCombo);
+      if (newCombo > maxCombo) setMaxCombo(newCombo);
+      if (newCombo > 1) soundManager.playCombo(newCombo);
+      setLastClearTime(now);
+
+      setTimeout(() => {
+        processCascadeStep(matches, 0);
+      }, 150);
+    } else {
+      // Invalid swap - animate back
+      setTiles(swappedTiles);
+      soundManager.playNearMiss();
+
+      setTimeout(() => {
+        setTiles(tiles); // Revert
+        setGamePhase(GAME_PHASE.IDLE);
+      }, 200);
+    }
+  }, [tiles, isGameOver, gamePhase, initSound, lastClearTime, combo, maxCombo, processCascadeStep]);
+
+  // ============================================
+  // TILE CLEAR HANDLER (for click/tap on clearable)
   // ============================================
 
   const handleTileClear = useCallback((tileId) => {
@@ -533,18 +614,13 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
 
     initSound();
 
+    const matchingTileIds = findMatchingGroup(tiles, tileId, GRID_SIZE);
+    if (matchingTileIds.length === 0) return;
+
     const now = Date.now();
     const timeSinceLastClear = now - lastClearTime;
 
-    const matchingTileIds = findMatchingGroup(tiles, tileId, GRID_SIZE);
-
-    if (matchingTileIds.length === 0) return;
-
-    // Get clicked tile for particle burst
-    const clearedTile = tiles.find(t => t.id === tileId);
-    const tileElement = gameBoardRef.current?.querySelector(`[data-tile-id="${tileId}"]`);
-
-    // Check for near-miss after this clear
+    // Check for near-miss
     const remainingTilesAfterClear = tiles.filter(t => !matchingTileIds.includes(t.id));
     const { newTiles: tilesAfterGravity } = applyGravity(remainingTilesAfterClear, GRID_SIZE);
     const remainingClearableAfterClear = findClearableTiles(tilesAfterGravity, GRID_SIZE);
@@ -557,73 +633,38 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
       setIsNearMiss(true);
       setNearMissPercent(entropyPercentage);
       soundManager.playNearMiss();
-      setTimeout(() => {
-        setIsNearMiss(false);
-      }, 800);
+      setTimeout(() => setIsNearMiss(false), 800);
     }
 
-    // Update combo
     const newCombo = updateCombo(combo, true, timeSinceLastClear);
     setCombo(newCombo);
-
-    if (newCombo > maxCombo) {
-      setMaxCombo(newCombo);
-    }
-
-    if (newCombo > 1) {
-      soundManager.playCombo(newCombo);
-    }
-
+    if (newCombo > maxCombo) setMaxCombo(newCombo);
+    if (newCombo > 1) soundManager.playCombo(newCombo);
     setLastClearTime(now);
 
-    // Trigger particle burst for critical or big clears
-    if (tileElement && clearedTile && matchingTileIds.length >= 4) {
-      const rect = tileElement.getBoundingClientRect();
-      const centerX = rect.left + rect.width / 2;
-      const centerY = rect.top + rect.height / 2;
-
+    // Particle burst
+    const clearedTile = tiles.find(t => t.id === tileId);
+    if (clearedTile && matchingTileIds.length >= 4) {
       const burstId = Date.now();
-      setParticleBursts(prev => [
-        ...prev,
-        {
+      const gridElement = gameBoardRef.current?.querySelector(`[data-tile-id="${tileId}"]`);
+      if (gridElement) {
+        const rect = gridElement.getBoundingClientRect();
+        setParticleBursts(prev => [...prev, {
           id: burstId,
-          x: centerX,
-          y: centerY,
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
           color: clearedTile.type === 'cyan' ? '#00f0ff' :
                  clearedTile.type === 'magenta' ? '#ff00ff' :
                  clearedTile.type === 'amber' ? '#ffb000' : '#a855f7',
-        },
-      ]);
-
-      setTimeout(() => {
-        setParticleBursts(prev => prev.filter(b => b.id !== burstId));
-      }, 1200);
+        }]);
+        setTimeout(() => {
+          setParticleBursts(prev => prev.filter(b => b.id !== burstId));
+        }, 1200);
+      }
     }
 
-    // Start cascade processing
     processCascadeStep(matchingTileIds, 0);
   }, [combo, lastClearTime, tiles, initSound, isGameOver, maxCombo, gamePhase, processCascadeStep]);
-
-  // ============================================
-  // TOUCH HANDLERS FOR SWIPE
-  // ============================================
-
-  const touchStartRef = useRef(null);
-
-  const handleBoardTouchStart = useCallback((e) => {
-    const touch = e.touches[0];
-    touchStartRef.current = {
-      x: touch.clientX,
-      y: touch.clientY,
-      time: Date.now(),
-    };
-  }, []);
-
-  const handleBoardTouchEnd = useCallback(() => {
-    // Touch end cleanup - actual tap handling is done in Tile component
-    // Swipe gestures could be added here for future features
-    touchStartRef.current = null;
-  }, []);
 
   // ============================================
   // RENDER
@@ -632,11 +673,8 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
   return (
     <div
       ref={gameBoardRef}
-      className="w-full h-full flex flex-col p-4 md:p-8 touch-none"
-      onTouchStart={handleBoardTouchStart}
-      onTouchEnd={handleBoardTouchEnd}
+      className="w-full h-full flex flex-col p-2 md:p-4"
     >
-      {/* SCREEN SHAKE CONTAINER */}
       <motion.div
         className="w-full h-full flex flex-col"
         animate={{
@@ -645,198 +683,124 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
         }}
         transition={{ duration: 0.4 }}
       >
-        {/* Header Stats */}
-        <div className="flex flex-wrap justify-between items-start mb-4 md:mb-8 gap-2 md:gap-4">
-          {/* Score + High Score */}
-          <motion.div
-            className="chamfer-sm bg-void-surface border-2 border-neon-cyan p-2 md:p-4 min-w-[140px] md:min-w-[200px] relative"
-            style={{
-              boxShadow: '0 0 20px #00f0ff, inset 0 0 20px rgba(0, 240, 255, 0.2)',
-            }}
-            whileHover={{
-              scale: 1.02,
-              boxShadow: '0 0 40px #00f0ff, inset 0 0 30px rgba(0, 240, 255, 0.3)',
-            }}
-            transition={SPRING_CONFIG}
-          >
-            <div className="flex justify-between items-center mb-1">
-              <div className="text-header text-neon-cyan text-xs md:text-sm">SCORE</div>
-              <div className="text-header text-text-muted text-[10px] md:text-xs">
-                BEST: {highScore.toLocaleString()}
-              </div>
-            </div>
+        {/* Compact Header Stats */}
+        <div className="flex flex-wrap justify-between items-center mb-2 md:mb-4 gap-2">
+          {/* Score */}
+          <div className="flex items-center gap-4">
             <motion.div
-              className="text-score text-2xl md:text-4xl text-white"
-              key={score}
-              initial={{ scale: 1.3, color: '#00f0ff' }}
-              animate={{ scale: 1, color: '#ffffff' }}
-              transition={{ duration: 0.3 }}
+              className="bg-void-surface/80 border border-neon-cyan rounded-lg px-3 py-1.5"
+              style={{ boxShadow: '0 0 15px #00f0ff40' }}
             >
-              {score.toLocaleString()}
+              <div className="text-[10px] text-neon-cyan font-rajdhani tracking-wider">SCORE</div>
+              <motion.div
+                className="text-lg md:text-xl font-bold text-white"
+                key={score}
+                initial={{ scale: 1.2, color: '#00f0ff' }}
+                animate={{ scale: 1, color: '#ffffff' }}
+              >
+                {score.toLocaleString()}
+              </motion.div>
             </motion.div>
-          </motion.div>
 
-          {/* Combo with Timer */}
-          <motion.div
-            className="chamfer-sm bg-void-surface border-2 p-2 md:p-4 min-w-[100px] md:min-w-[150px]"
-            style={{
-              borderColor: combo > 0 ? '#ffb000' : '#1a1a28',
-              boxShadow: combo > 0
-                ? '0 0 30px #ffb000, inset 0 0 20px rgba(255, 176, 0, 0.2)'
-                : 'none',
-            }}
-            animate={{
-              scale: combo > 1 ? [1, 1.05, 1] : 1,
-            }}
-            transition={{ duration: 0.3 }}
-          >
-            <div className="text-header text-neon-amber text-xs md:text-sm mb-1">COMBO</div>
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={combo}
-                className="text-score text-xl md:text-3xl text-white"
-                initial={{ y: -20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: 20, opacity: 0 }}
-                transition={SPRING_CONFIG}
-              >
+            {/* Combo */}
+            <motion.div
+              className="bg-void-surface/80 border rounded-lg px-3 py-1.5"
+              style={{
+                borderColor: combo > 0 ? '#ffb000' : '#1a1a28',
+                boxShadow: combo > 0 ? '0 0 15px #ffb00040' : 'none',
+              }}
+            >
+              <div className="text-[10px] text-neon-amber font-rajdhani tracking-wider">COMBO</div>
+              <div className="text-lg md:text-xl font-bold text-white">
                 {combo > 0 ? `x${combo}` : '--'}
-              </motion.div>
-            </AnimatePresence>
-            <div className="mt-2 h-1 bg-void-deep rounded-full overflow-hidden">
-              <motion.div
-                className="h-full"
-                style={{
-                  backgroundColor: comboTimeLeft > 30 ? '#ffb000' : '#ff3366',
-                }}
-                animate={{ width: `${comboTimeLeft}%` }}
-                transition={{ duration: 0.05 }}
-              />
-            </div>
-          </motion.div>
-
-          {/* Entropy Level */}
-          <motion.div
-            className="chamfer-sm bg-void-surface border-2 p-2 md:p-4 min-w-[120px] md:min-w-[180px]"
-            style={{
-              borderColor: entropyLevel > 70 ? '#ff3366' : '#1a1a28',
-              boxShadow: entropyLevel > 70
-                ? '0 0 30px #ff3366, inset 0 0 20px rgba(255, 51, 102, 0.2)'
-                : 'none',
-            }}
-            animate={{
-              scale: entropyLevel > 80 ? [1, 1.02, 1] : 1,
-            }}
-            transition={{
-              duration: 0.5,
-              repeat: entropyLevel > 80 ? Infinity : 0,
-            }}
-          >
-            <div className="text-header text-chaos text-xs md:text-sm mb-1">ENTROPY</div>
-            <div className="flex items-center gap-2">
-              <motion.div
-                className="text-score text-xl md:text-3xl text-white"
-                animate={{
-                  color: entropyLevel > 70 ? '#ff3366' : '#ffffff',
-                }}
-              >
-                {entropyLevel}%
-              </motion.div>
-              <div className="flex-1 h-2 bg-void-deep rounded-full overflow-hidden">
-                <motion.div
-                  className="h-full bg-gradient-to-r from-order to-chaos"
-                  initial={{ width: 0 }}
-                  animate={{ width: `${entropyLevel}%` }}
-                  transition={{ duration: 0.5, ease: 'easeOut' }}
-                />
               </div>
-            </div>
-          </motion.div>
-
-          {/* Difficulty & Controls */}
-          <div className="flex flex-col items-end gap-2">
-            {/* Difficulty Indicator */}
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-text-muted font-rajdhani tracking-wider">LVL</span>
-              <div className="flex gap-0.5">
-                {Array.from({ length: 10 }).map((_, i) => (
+              {combo > 0 && (
+                <div className="h-0.5 bg-void-deep rounded-full overflow-hidden mt-1">
                   <motion.div
-                    key={i}
-                    className="w-1.5 md:w-2 h-2 md:h-3 rounded-sm"
-                    style={{
-                      backgroundColor: i < difficultyLevel ? '#a855f7' : '#1a1a28',
-                      boxShadow: i < difficultyLevel ? '0 0 4px #a855f7' : 'none',
-                    }}
-                    animate={{
-                      scale: i === difficultyLevel - 1 ? [1, 1.2, 1] : 1,
-                    }}
-                    transition={{ duration: 0.3 }}
+                    className="h-full bg-neon-amber"
+                    animate={{ width: `${comboTimeLeft}%` }}
                   />
-                ))}
-              </div>
-              {streak > 0 && (
-                <span className="text-order ml-2" title={`${streak} day streak`}>
-                  {streak}d
-                </span>
+                </div>
               )}
+            </motion.div>
+
+            {/* Entropy */}
+            <motion.div
+              className="bg-void-surface/80 border rounded-lg px-3 py-1.5"
+              style={{
+                borderColor: entropyLevel > 70 ? '#ff3366' : '#1a1a28',
+                boxShadow: entropyLevel > 70 ? '0 0 15px #ff336640' : 'none',
+              }}
+              animate={{ scale: entropyLevel > 80 ? [1, 1.02, 1] : 1 }}
+              transition={{ duration: 0.5, repeat: entropyLevel > 80 ? Infinity : 0 }}
+            >
+              <div className="text-[10px] text-chaos font-rajdhani tracking-wider">ENTROPY</div>
+              <div className="flex items-center gap-2">
+                <span className="text-lg md:text-xl font-bold text-white">{entropyLevel}%</span>
+                <div className="w-16 h-1.5 bg-void-deep rounded-full overflow-hidden">
+                  <motion.div
+                    className="h-full bg-gradient-to-r from-order to-chaos"
+                    animate={{ width: `${entropyLevel}%` }}
+                  />
+                </div>
+              </div>
+            </motion.div>
+          </div>
+
+          {/* Controls */}
+          <div className="flex items-center gap-1">
+            <div className="flex gap-0.5 mr-2">
+              {Array.from({ length: 10 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="w-1.5 h-3 rounded-sm"
+                  style={{
+                    backgroundColor: i < difficultyLevel ? '#a855f7' : '#1a1a28',
+                    boxShadow: i < difficultyLevel ? '0 0 4px #a855f7' : 'none',
+                  }}
+                />
+              ))}
             </div>
-            {/* Control Buttons */}
-            <div className="flex flex-wrap gap-1 md:gap-2">
-              <motion.button
-                className={`chamfer-sm px-2 md:px-3 py-1 md:py-2 border-2 font-rajdhani font-bold tracking-wider text-[10px] md:text-xs
-                  ${isPaused
-                    ? 'bg-neon-amber border-neon-amber text-void-black'
-                    : 'bg-void-surface border-void-border text-text-muted hover:border-neon-cyan hover:text-neon-cyan'
-                  }`}
-                style={{
-                  boxShadow: isPaused ? '0 0 20px #ffb000' : 'none',
-                }}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={togglePause}
-              >
-                {isPaused ? 'RESUME' : 'PAUSE'}
-              </motion.button>
-              <motion.button
-                className="chamfer-sm bg-void-surface border-2 border-void-border px-2 md:px-3 py-1 md:py-2 text-text-muted font-rajdhani font-bold tracking-wider text-[10px] md:text-xs hover:border-chaos hover:text-chaos"
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={restartGame}
-              >
-                RESTART
-              </motion.button>
-              <motion.button
-                className={`chamfer-sm px-2 md:px-3 py-1 md:py-2 border-2 font-rajdhani font-bold tracking-wider text-[10px] md:text-xs
-                  ${soundEnabled
-                    ? 'bg-void-surface border-order text-order'
-                    : 'bg-void-surface border-void-border text-text-muted'
-                  }`}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => {
-                  initSound();
-                  toggleSound();
-                }}
-              >
-                {soundEnabled ? '♪' : '♪̸'}
-              </motion.button>
-              <motion.button
-                className="chamfer-sm bg-void-surface border-2 border-void-border px-2 md:px-3 py-1 md:py-2 text-text-muted font-rajdhani font-bold tracking-wider text-[10px] md:text-xs hover:border-neon-violet hover:text-neon-violet"
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={onHelp}
-              >
-                ?
-              </motion.button>
-              <motion.button
-                className="chamfer-sm bg-void-surface border-2 border-void-border px-2 md:px-3 py-1 md:py-2 text-text-muted font-rajdhani font-bold tracking-wider text-[10px] md:text-xs hover:border-neon-magenta hover:text-neon-magenta"
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={onHome}
-              >
-                ✕
-              </motion.button>
-            </div>
+            <motion.button
+              className="bg-void-surface border border-void-border rounded px-2 py-1 text-text-muted text-xs font-rajdhani hover:border-neon-cyan hover:text-neon-cyan"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={togglePause}
+            >
+              {isPaused ? '▶' : '⏸'}
+            </motion.button>
+            <motion.button
+              className="bg-void-surface border border-void-border rounded px-2 py-1 text-text-muted text-xs font-rajdhani hover:border-chaos hover:text-chaos"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={restartGame}
+            >
+              ↻
+            </motion.button>
+            <motion.button
+              className={`bg-void-surface border rounded px-2 py-1 text-xs font-rajdhani ${soundEnabled ? 'border-order text-order' : 'border-void-border text-text-muted'}`}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => { initSound(); toggleSound(); }}
+            >
+              {soundEnabled ? '♪' : '♪̸'}
+            </motion.button>
+            <motion.button
+              className="bg-void-surface border border-void-border rounded px-2 py-1 text-text-muted text-xs font-rajdhani hover:border-neon-violet hover:text-neon-violet"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={onHelp}
+            >
+              ?
+            </motion.button>
+            <motion.button
+              className="bg-void-surface border border-void-border rounded px-2 py-1 text-text-muted text-xs font-rajdhani hover:border-neon-magenta hover:text-neon-magenta"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={onHome}
+            >
+              ✕
+            </motion.button>
           </div>
         </div>
 
@@ -848,29 +812,12 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
               initial={{ opacity: 0, scale: 0.5 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 1.5 }}
-              transition={{
-                type: 'spring',
-                stiffness: 500,
-                damping: 20,
-              }}
             >
               <motion.div
-                className="text-impact text-4xl md:text-6xl text-neon-violet px-4 text-center"
-                style={{
-                  textShadow: '0 0 40px #a855f7, 0 0 80px #a855f7',
-                }}
-                animate={{
-                  scale: [1, 1.1, 1],
-                  filter: [
-                    'hue-rotate(0deg)',
-                    'hue-rotate(180deg)',
-                    'hue-rotate(0deg)',
-                  ],
-                }}
-                transition={{
-                  duration: 0.5,
-                  repeat: 1,
-                }}
+                className="text-impact text-3xl md:text-5xl text-neon-violet text-center px-4"
+                style={{ textShadow: '0 0 40px #a855f7' }}
+                animate={{ scale: [1, 1.1, 1] }}
+                transition={{ duration: 0.3, repeat: 1 }}
               >
                 {criticalMessage}
               </motion.div>
@@ -882,17 +829,14 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
         <AnimatePresence>
           {isNearMiss && (
             <motion.div
-              className="fixed top-1/3 left-1/2 pointer-events-none z-40"
-              initial={{ x: '-50%', y: -50, opacity: 0, scale: 0.5 }}
-              animate={{ x: '-50%', y: 0, opacity: 1, scale: 1 }}
-              exit={{ y: 50, opacity: 0, scale: 0.5 }}
-              transition={SPRING_CONFIG}
+              className="fixed top-1/4 left-1/2 -translate-x-1/2 pointer-events-none z-40"
+              initial={{ y: -30, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 30, opacity: 0 }}
             >
               <div
-                className="text-header text-lg md:text-2xl text-neon-magenta px-4 md:px-8 py-2 md:py-4 chamfer-sm border-2 border-neon-magenta bg-void-deep whitespace-nowrap"
-                style={{
-                  boxShadow: '0 0 40px #ff00ff, inset 0 0 20px rgba(255, 0, 255, 0.3)',
-                }}
+                className="text-lg md:text-xl font-rajdhani font-bold text-neon-magenta px-4 py-2 bg-void-deep border-2 border-neon-magenta rounded-lg"
+                style={{ boxShadow: '0 0 30px #ff00ff' }}
               >
                 SO CLOSE! {nearMissPercent}% ENTROPY REMAINS
               </div>
@@ -908,27 +852,15 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
             >
-              <motion.div
-                className="text-center"
-                initial={{ scale: 0.8, y: 20 }}
-                animate={{ scale: 1, y: 0 }}
-                exit={{ scale: 0.8, y: 20 }}
-              >
-                <div
-                  className="text-impact text-4xl md:text-6xl text-neon-cyan mb-4"
-                  style={{ textShadow: '0 0 40px #00f0ff' }}
-                >
+              <motion.div className="text-center" initial={{ scale: 0.8 }} animate={{ scale: 1 }}>
+                <div className="text-impact text-4xl md:text-6xl text-neon-cyan mb-4" style={{ textShadow: '0 0 40px #00f0ff' }}>
                   PAUSED
                 </div>
-                <div className="text-header text-text-muted text-sm md:text-lg mb-8">
-                  ENTROPY GENERATION HALTED
-                </div>
                 <motion.button
-                  className="chamfer-sm bg-neon-cyan text-void-black px-6 md:px-8 py-3 md:py-4 font-rajdhani font-bold text-lg md:text-xl tracking-wider"
+                  className="bg-neon-cyan text-void-black px-6 py-3 rounded-lg font-rajdhani font-bold text-lg"
                   style={{ boxShadow: '0 0 30px #00f0ff' }}
-                  whileHover={{ scale: 1.05, boxShadow: '0 0 50px #00f0ff' }}
+                  whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   onClick={togglePause}
                 >
@@ -946,151 +878,76 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
               className="fixed inset-0 bg-void-black/95 flex items-center justify-center z-50 p-4"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
             >
               <motion.div
-                className="text-center max-w-md w-full"
+                className="text-center max-w-sm w-full"
                 initial={{ scale: 0.8, y: 30 }}
                 animate={{ scale: 1, y: 0 }}
-                transition={{ delay: 0.2, type: 'spring', stiffness: 200 }}
               >
-                <motion.div
-                  className="text-impact text-3xl md:text-5xl text-chaos mb-2"
-                  style={{ textShadow: '0 0 40px #ff3366, 0 0 80px #ff3366' }}
-                  animate={{
-                    textShadow: [
-                      '0 0 40px #ff3366, 0 0 80px #ff3366',
-                      '0 0 60px #ff3366, 0 0 120px #ff3366',
-                      '0 0 40px #ff3366, 0 0 80px #ff3366',
-                    ],
-                  }}
-                  transition={{ duration: 2, repeat: Infinity }}
-                >
+                <div className="text-impact text-3xl md:text-4xl text-chaos mb-2" style={{ textShadow: '0 0 40px #ff3366' }}>
                   ENTROPY OVERFLOW
-                </motion.div>
-                <div className="text-text-muted text-sm md:text-lg mb-6">System collapse imminent...</div>
+                </div>
+                <div className="text-text-muted text-sm mb-4">System collapse...</div>
 
-                <motion.div
-                  className="chamfer-lg bg-void-surface border-2 border-neon-cyan p-4 md:p-6 mb-6"
-                  style={{ boxShadow: '0 0 30px #00f0ff' }}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.4 }}
-                >
-                  <div className="grid grid-cols-2 gap-3 md:gap-4 text-left">
-                    <div>
-                      <div className="text-[10px] md:text-xs text-text-muted font-rajdhani tracking-wider">FINAL SCORE</div>
-                      <div className="text-xl md:text-2xl font-bold text-white">{score.toLocaleString()}</div>
-                      {score >= highScore && score > 0 && (
-                        <div className="text-[10px] md:text-xs text-neon-amber">NEW HIGH SCORE!</div>
-                      )}
-                    </div>
-                    <div>
-                      <div className="text-[10px] md:text-xs text-text-muted font-rajdhani tracking-wider">SURVIVAL TIME</div>
-                      <div className="text-xl md:text-2xl font-bold text-white">
-                        {Math.floor(gameTime / 60000)}:{((gameTime % 60000) / 1000).toFixed(0).padStart(2, '0')}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] md:text-xs text-text-muted font-rajdhani tracking-wider">MAX COMBO</div>
-                      <div className="text-xl md:text-2xl font-bold text-neon-amber">x{maxCombo}</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] md:text-xs text-text-muted font-rajdhani tracking-wider">TILES CLEARED</div>
-                      <div className="text-xl md:text-2xl font-bold text-neon-cyan">{tilesCleared}</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] md:text-xs text-text-muted font-rajdhani tracking-wider">DIFFICULTY</div>
-                      <div className="text-xl md:text-2xl font-bold text-neon-violet">{difficultyLevel}/10</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] md:text-xs text-text-muted font-rajdhani tracking-wider">DAILY STREAK</div>
-                      <div className="text-xl md:text-2xl font-bold text-order">
-                        {streak > 0 ? `${streak} days` : '--'}
-                      </div>
-                    </div>
+                <div className="bg-void-surface border-2 border-neon-cyan rounded-lg p-4 mb-4" style={{ boxShadow: '0 0 20px #00f0ff' }}>
+                  <div className="grid grid-cols-2 gap-3 text-left">
+                    <div><div className="text-[10px] text-text-muted">SCORE</div><div className="text-xl font-bold">{score.toLocaleString()}</div></div>
+                    <div><div className="text-[10px] text-text-muted">TIME</div><div className="text-xl font-bold">{Math.floor(gameTime / 60000)}:{((gameTime % 60000) / 1000).toFixed(0).padStart(2, '0')}</div></div>
+                    <div><div className="text-[10px] text-text-muted">MAX COMBO</div><div className="text-xl font-bold text-neon-amber">x{maxCombo}</div></div>
+                    <div><div className="text-[10px] text-text-muted">CLEARED</div><div className="text-xl font-bold text-neon-cyan">{tilesCleared}</div></div>
                   </div>
-                </motion.div>
+                </div>
 
-                <motion.div
-                  className="flex flex-col gap-3"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.6 }}
-                >
+                <div className="flex flex-col gap-2">
                   <motion.button
-                    className="chamfer-sm bg-neon-cyan text-void-black px-6 md:px-8 py-3 md:py-4 font-rajdhani font-bold text-lg md:text-xl tracking-wider w-full"
-                    style={{ boxShadow: '0 0 30px #00f0ff' }}
-                    whileHover={{ scale: 1.02, boxShadow: '0 0 50px #00f0ff' }}
+                    className="bg-neon-cyan text-void-black px-6 py-3 rounded-lg font-rajdhani font-bold text-lg w-full"
+                    whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={restartGame}
                   >
                     PLAY AGAIN
                   </motion.button>
-
                   <motion.button
-                    className="chamfer-sm bg-void-surface border-2 border-neon-violet text-neon-violet px-6 md:px-8 py-2 md:py-3 font-rajdhani font-bold text-base md:text-lg tracking-wider w-full"
-                    whileHover={{ scale: 1.02, boxShadow: '0 0 20px #a855f7' }}
-                    whileTap={{ scale: 0.98 }}
+                    className="bg-void-surface border-2 border-neon-violet text-neon-violet px-4 py-2 rounded-lg font-rajdhani font-bold w-full"
+                    whileHover={{ scale: 1.02 }}
                     onClick={shareResults}
                   >
-                    {showShareCopied ? 'COPIED!' : 'SHARE RESULTS'}
+                    {showShareCopied ? 'COPIED!' : 'SHARE'}
                   </motion.button>
-
                   <motion.button
-                    className="chamfer-sm bg-void-surface border-2 border-void-border text-text-muted px-6 md:px-8 py-2 md:py-3 font-rajdhani font-bold text-base md:text-lg tracking-wider w-full hover:border-neon-magenta hover:text-neon-magenta"
+                    className="bg-void-surface border border-void-border text-text-muted px-4 py-2 rounded-lg font-rajdhani w-full hover:border-neon-magenta hover:text-neon-magenta"
                     whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
                     onClick={onHome}
                   >
                     HOME
                   </motion.button>
-                </motion.div>
+                </div>
               </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* Game Board */}
-        <div className="flex-1 flex items-center justify-center">
+        {/* Game Board - RESPONSIVE */}
+        <div ref={containerRef} className="flex-1 flex items-center justify-center min-h-0">
           <motion.div
-            className="relative bg-void-deep border-2 p-2 md:p-4 rounded-lg"
+            className="relative bg-void-deep/90 border-2 border-neon-cyan rounded-xl p-2"
             style={{
-              borderColor: isNearMiss ? '#ff3366' : '#00f0ff',
               boxShadow: isNearMiss
-                ? '0 0 60px #ff3366, inset 0 0 30px rgba(255, 51, 102, 0.2)'
-                : '0 0 40px #00f0ff, inset 0 0 20px rgba(0, 240, 255, 0.1)',
+                ? '0 0 50px #ff3366, inset 0 0 20px rgba(255, 51, 102, 0.2)'
+                : '0 0 30px #00f0ff40, inset 0 0 15px rgba(0, 240, 255, 0.1)',
+              width: gridPixelSize + 16,
+              height: gridPixelSize + 16,
             }}
-            animate={{
-              borderColor: isNearMiss
-                ? ['#ff3366', '#ffb000', '#ff3366']
-                : '#00f0ff',
-            }}
-            transition={{ duration: 0.3 }}
           >
-            {/* Grid background pattern */}
+            {/* Grid */}
             <div
-              className="absolute inset-2 md:inset-4 opacity-20 pointer-events-none"
+              className="grid relative"
               style={{
-                backgroundImage: `
-                  linear-gradient(to right, #00f0ff 1px, transparent 1px),
-                  linear-gradient(to bottom, #00f0ff 1px, transparent 1px)
-                `,
-                backgroundSize: `${GAME_CONFIG.CELL_SIZE}px ${GAME_CONFIG.CELL_SIZE}px`,
-              }}
-            />
-
-            <div
-              className="grid gap-1 md:gap-2 relative"
-              style={{
-                gridTemplateColumns: `repeat(${GRID_SIZE}, 1fr)`,
-                gridTemplateRows: `repeat(${GRID_SIZE}, 1fr)`,
-                width: `${GRID_SIZE * 56}px`,
-                height: `${GRID_SIZE * 56}px`,
+                gridTemplateColumns: `repeat(${GRID_SIZE}, ${cellSize}px)`,
+                gridTemplateRows: `repeat(${GRID_SIZE}, ${cellSize}px)`,
+                gap: '4px',
               }}
             >
-              {/* Render grid cells */}
               {Array.from({ length: GRID_SIZE * GRID_SIZE }).map((_, index) => {
                 const x = index % GRID_SIZE;
                 const y = Math.floor(index / GRID_SIZE);
@@ -1099,11 +956,8 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
                 return (
                   <div
                     key={`cell-${x}-${y}`}
-                    className="relative bg-void-surface/50 rounded"
-                    style={{
-                      width: '52px',
-                      height: '52px',
-                    }}
+                    className="relative bg-void-surface/30 rounded-lg"
+                    style={{ width: cellSize, height: cellSize }}
                     data-tile-id={tile?.id}
                   >
                     <AnimatePresence mode="popLayout">
@@ -1112,8 +966,10 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
                           key={tile.id}
                           tile={tile}
                           onClear={handleTileClear}
+                          onSwap={handleSwap}
                           isClearable={clearableTileIds.includes(tile.id)}
-                          isFalling={fallingTiles.has(tile.id)}
+                          isSelected={selectedTile === tile.id}
+                          cellSize={cellSize}
                         />
                       )}
                     </AnimatePresence>
@@ -1124,22 +980,10 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
           </motion.div>
         </div>
 
-        {/* Footer Info */}
-        <motion.div
-          className="mt-4 md:mt-6 text-center text-text-muted text-xs md:text-sm font-exo"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5 }}
-        >
-          <p className="tracking-moderate mb-2">
-            TAP MATCHING TILES TO CLEAR • CHAIN REACTIONS FOR BONUS POINTS
-          </p>
-          <p className="text-[10px] md:text-xs opacity-60 hidden md:block">
-            <span className="text-neon-cyan">[SPACE]</span> Pause
-            <span className="mx-2">•</span>
-            <span className="text-neon-cyan">[R]</span> Restart
-          </p>
-        </motion.div>
+        {/* Footer */}
+        <div className="text-center text-text-muted text-xs py-2 font-exo">
+          DRAG or TAP to match • Chains = Bonus
+        </div>
       </motion.div>
 
       {/* Particle Bursts */}
@@ -1150,9 +994,7 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
             x={burst.x}
             y={burst.y}
             color={burst.color}
-            onComplete={() => {
-              setParticleBursts(prev => prev.filter(b => b.id !== burst.id));
-            }}
+            onComplete={() => setParticleBursts(prev => prev.filter(b => b.id !== burst.id))}
           />
         ))}
       </AnimatePresence>
