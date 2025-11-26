@@ -17,7 +17,8 @@ export const GAME_CONFIG = {
 
   // Zeigarnik Effect (cite: 107, 110)
   MIN_ENTROPY_TILES: 2,          // Never allow full closure
-  ENTROPY_SPAWN_DELAY: 800,      // OPTIMIZED: 800ms for high-velocity flow
+  ENTROPY_SPAWN_DELAY_BASE: 1200, // Base spawn delay in ms
+  ENTROPY_SPAWN_DELAY_MIN: 400,   // Minimum spawn delay (difficulty cap)
 
   // Entropy Mechanics (cite: 96, 99, 100)
   MAX_ENTROPY_LEVEL: 100,
@@ -27,7 +28,106 @@ export const GAME_CONFIG = {
   // Scoring
   BASE_POINTS_PER_CLEAR: 10,
   COMBO_MULTIPLIER: 1.5,
+
+  // Flow/Difficulty Progression
+  DIFFICULTY_RAMP_INTERVAL: 30000, // Increase difficulty every 30 seconds
+  DIFFICULTY_RAMP_AMOUNT: 100,     // Reduce spawn delay by 100ms each interval
 };
+
+// ============================================
+// DIFFICULTY / FLOW MANAGEMENT
+// ============================================
+
+/**
+ * Calculates spawn delay based on game time for flow maintenance
+ * Implements dynamic difficulty adjustment to keep player in "Flow Channel"
+ *
+ * @param {number} gameTimeMs - Time since game started in milliseconds
+ * @returns {number} - Spawn delay in milliseconds
+ */
+export function calculateSpawnDelay(gameTimeMs) {
+  const intervals = Math.floor(gameTimeMs / GAME_CONFIG.DIFFICULTY_RAMP_INTERVAL);
+  const reduction = intervals * GAME_CONFIG.DIFFICULTY_RAMP_AMOUNT;
+  const delay = GAME_CONFIG.ENTROPY_SPAWN_DELAY_BASE - reduction;
+  return Math.max(GAME_CONFIG.ENTROPY_SPAWN_DELAY_MIN, delay);
+}
+
+/**
+ * Get difficulty level for display (1-10 scale)
+ *
+ * @param {number} gameTimeMs - Time since game started
+ * @returns {number} - Difficulty level 1-10
+ */
+export function getDifficultyLevel(gameTimeMs) {
+  const maxReduction = GAME_CONFIG.ENTROPY_SPAWN_DELAY_BASE - GAME_CONFIG.ENTROPY_SPAWN_DELAY_MIN;
+  const intervals = Math.floor(gameTimeMs / GAME_CONFIG.DIFFICULTY_RAMP_INTERVAL);
+  const currentReduction = Math.min(intervals * GAME_CONFIG.DIFFICULTY_RAMP_AMOUNT, maxReduction);
+  return Math.min(10, Math.floor((currentReduction / maxReduction) * 9) + 1);
+}
+
+// ============================================
+// STREAK SYSTEM (Loss Aversion)
+// ============================================
+
+const STREAK_KEY = 'entropyReduction_streak';
+const LAST_PLAY_KEY = 'entropyReduction_lastPlay';
+
+/**
+ * Get current streak data from localStorage
+ * Implements loss aversion through daily streak tracking
+ *
+ * @returns {object} - { streak: number, lastPlayDate: string|null, streakAlive: boolean }
+ */
+export function getStreakData() {
+  const streak = parseInt(localStorage.getItem(STREAK_KEY) || '0', 10);
+  const lastPlay = localStorage.getItem(LAST_PLAY_KEY);
+
+  if (!lastPlay) {
+    return { streak: 0, lastPlayDate: null, streakAlive: true };
+  }
+
+  const lastDate = new Date(lastPlay);
+  const today = new Date();
+
+  // Reset time to compare dates only
+  lastDate.setHours(0, 0, 0, 0);
+  today.setHours(0, 0, 0, 0);
+
+  const diffDays = Math.floor((today - lastDate) / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) {
+    // Already played today
+    return { streak, lastPlayDate: lastPlay, streakAlive: true, playedToday: true };
+  } else if (diffDays === 1) {
+    // Streak can be extended
+    return { streak, lastPlayDate: lastPlay, streakAlive: true, playedToday: false };
+  } else {
+    // Streak is broken
+    return { streak: 0, lastPlayDate: lastPlay, streakAlive: false, playedToday: false };
+  }
+}
+
+/**
+ * Record a play session and update streak
+ *
+ * @returns {object} - Updated streak data
+ */
+export function recordPlay() {
+  const { streak, streakAlive, playedToday } = getStreakData();
+  const today = new Date().toISOString();
+
+  if (playedToday) {
+    // Already played today, don't update streak
+    return { streak, isNewDay: false };
+  }
+
+  const newStreak = streakAlive ? streak + 1 : 1;
+
+  localStorage.setItem(STREAK_KEY, newStreak.toString());
+  localStorage.setItem(LAST_PLAY_KEY, today);
+
+  return { streak: newStreak, isNewDay: true };
+}
 
 // ============================================
 // VARIABLE RATIO REWARD SYSTEM

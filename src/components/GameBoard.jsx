@@ -11,6 +11,10 @@ import {
   updateCombo,
   findClearableTiles,
   findMatchingGroup,
+  calculateSpawnDelay,
+  getDifficultyLevel,
+  getStreakData,
+  recordPlay,
   GAME_CONFIG,
 } from '../lib/gameLogic';
 import { soundManager } from '../lib/sounds';
@@ -56,16 +60,68 @@ export default function GameBoard({ onHome, onHelp }) {
     const saved = localStorage.getItem('entropyReduction_soundEnabled');
     return saved !== 'false'; // Default to true
   });
+
+  // Game Over & Progression State
+  const [isGameOver, setIsGameOver] = useState(false);
+  const [gameStartTime, setGameStartTime] = useState(Date.now());
+  const [gameTime, setGameTime] = useState(0);
+  const [difficultyLevel, setDifficultyLevel] = useState(1);
+  const [maxCombo, setMaxCombo] = useState(0);
+  const [tilesCleared, setTilesCleared] = useState(0);
+  const [streak, setStreak] = useState(() => {
+    const data = getStreakData();
+    return data.streak;
+  });
+  const [showShareCopied, setShowShareCopied] = useState(false);
+
   const gameBoardRef = useRef(null);
   const comboTimerRef = useRef(null);
   const soundInitialized = useRef(false);
+  const lastDifficultyLevel = useRef(1);
+
+  // ============================================
+  // GAME TIMER & DIFFICULTY PROGRESSION
+  // ============================================
+
+  useEffect(() => {
+    if (isPaused || isGameOver) return;
+
+    const timer = setInterval(() => {
+      const elapsed = Date.now() - gameStartTime;
+      setGameTime(elapsed);
+
+      const newDifficulty = getDifficultyLevel(elapsed);
+      if (newDifficulty > lastDifficultyLevel.current) {
+        lastDifficultyLevel.current = newDifficulty;
+        setDifficultyLevel(newDifficulty);
+        soundManager.playDifficultyUp();
+      }
+    }, 100);
+
+    return () => clearInterval(timer);
+  }, [gameStartTime, isPaused, isGameOver]);
+
+  // ============================================
+  // GAME OVER CHECK
+  // ============================================
+
+  useEffect(() => {
+    if (entropyLevel >= 100 && !isGameOver) {
+      setIsGameOver(true);
+      soundManager.playGameOver();
+
+      // Record play session for streak
+      const { streak: newStreak } = recordPlay();
+      setStreak(newStreak);
+    }
+  }, [entropyLevel, isGameOver]);
 
   // ============================================
   // COMBO TIMER
   // ============================================
 
   useEffect(() => {
-    if (combo > 0 && !isPaused) {
+    if (combo > 0 && !isPaused && !isGameOver) {
       const COMBO_TIMEOUT = 3000;
       const updateInterval = 50; // Update every 50ms for smooth animation
 
@@ -96,7 +152,7 @@ export default function GameBoard({ onHome, onHelp }) {
     } else {
       setComboTimeLeft(0);
     }
-  }, [combo, lastClearTime, isPaused]);
+  }, [combo, lastClearTime, isPaused, isGameOver]);
 
   // ============================================
   // HIGH SCORE PERSISTENCE
@@ -167,7 +223,61 @@ export default function GameBoard({ onHome, onHelp }) {
     setParticleBursts([]);
     setIsPaused(false);
     setComboTimeLeft(0);
+
+    // Reset game over & progression state
+    setIsGameOver(false);
+    setGameStartTime(Date.now());
+    setGameTime(0);
+    setDifficultyLevel(1);
+    setMaxCombo(0);
+    setTilesCleared(0);
+    lastDifficultyLevel.current = 1;
   }, []);
+
+  // ============================================
+  // SHARE RESULTS (Social Currency)
+  // ============================================
+
+  const generateShareText = useCallback(() => {
+    const minutes = Math.floor(gameTime / 60000);
+    const seconds = Math.floor((gameTime % 60000) / 1000);
+    const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+
+    const scoreBlocks = Math.min(10, Math.floor(score / 500));
+    const scoreBar = '█'.repeat(scoreBlocks) + '░'.repeat(10 - scoreBlocks);
+
+    return `ENTROPY REDUCTION
+🎯 Score: ${score.toLocaleString()}
+⏱️ Time: ${timeStr}
+🔥 Max Combo: x${maxCombo}
+💀 Difficulty: ${difficultyLevel}/10
+📊 [${scoreBar}]
+${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}
+Play at: entropy-reduction.game`;
+  }, [score, gameTime, maxCombo, difficultyLevel, streak]);
+
+  const shareResults = useCallback(async () => {
+    const text = generateShareText();
+
+    try {
+      if (navigator.share) {
+        await navigator.share({ text });
+      } else {
+        await navigator.clipboard.writeText(text);
+        setShowShareCopied(true);
+        setTimeout(() => setShowShareCopied(false), 2000);
+      }
+    } catch {
+      // Fallback: just copy to clipboard
+      try {
+        await navigator.clipboard.writeText(text);
+        setShowShareCopied(true);
+        setTimeout(() => setShowShareCopied(false), 2000);
+      } catch {
+        // Silent fail if clipboard also unavailable
+      }
+    }
+  }, [generateShareText]);
 
   // ============================================
   // PAUSE TOGGLE
@@ -244,8 +354,11 @@ export default function GameBoard({ onHome, onHelp }) {
   // ============================================
 
   useEffect(() => {
-    // Don't spawn when paused or board is nearly full
-    if (isPaused || tiles.length >= GRID_SIZE * GRID_SIZE - 4) return;
+    // Don't spawn when paused, game over, or board is nearly full
+    if (isPaused || isGameOver || tiles.length >= GRID_SIZE * GRID_SIZE - 4) return;
+
+    // Dynamic spawn delay based on game time (difficulty progression)
+    const spawnDelay = calculateSpawnDelay(gameTime);
 
     const spawnTimer = setTimeout(() => {
       const spawnCount = calculateEntropySpawn(tiles.length, GRID_SIZE);
@@ -268,16 +381,19 @@ export default function GameBoard({ onHome, onHelp }) {
           setTiles(prev => [...prev, ...newTiles]);
         }
       }
-    }, GAME_CONFIG.ENTROPY_SPAWN_DELAY);
+    }, spawnDelay);
 
     return () => clearTimeout(spawnTimer);
-  }, [tiles, isPaused]);
+  }, [tiles, isPaused, isGameOver, gameTime]);
 
   // ============================================
   // CLEAR MECHANICS
   // ============================================
 
   const handleTileClear = useCallback((tileId) => {
+    // Don't allow clearing during game over
+    if (isGameOver) return;
+
     // Initialize sound on first user interaction
     initSound();
 
@@ -320,16 +436,24 @@ export default function GameBoard({ onHome, onHelp }) {
     const newCombo = updateCombo(combo, true, timeSinceLastClear);
     setCombo(newCombo);
 
+    // Track max combo
+    if (newCombo > maxCombo) {
+      setMaxCombo(newCombo);
+    }
+
+    // Track total tiles cleared
+    setTilesCleared(prev => prev + matchingTileIds.length);
+
     // Play combo sound if combo increased
     if (newCombo > 1) {
       soundManager.playCombo(newCombo);
     }
 
     // Calculate reward - bonus points for clearing more tiles!
-    const tilesCleared = matchingTileIds.length;
-    const basePoints = GAME_CONFIG.BASE_POINTS_PER_CLEAR * tilesCleared;
+    const clearedCount = matchingTileIds.length;
+    const basePoints = GAME_CONFIG.BASE_POINTS_PER_CLEAR * clearedCount;
     // Bonus multiplier for clearing 4+ tiles (match-4, match-5, etc.)
-    const matchBonus = tilesCleared > 3 ? 1 + (tilesCleared - 3) * 0.5 : 1;
+    const matchBonus = clearedCount > 3 ? 1 + (clearedCount - 3) * 0.5 : 1;
 
     const reward = calculateReward(
       Math.floor(basePoints * matchBonus),
@@ -342,16 +466,16 @@ export default function GameBoard({ onHome, onHelp }) {
     // Play appropriate sound based on clear type
     if (reward.isCritical) {
       soundManager.playCritical();
-    } else if (tilesCleared >= 4) {
+    } else if (clearedCount >= 4) {
       soundManager.playBigClear();
     } else {
       // Normal clear with pitch based on tiles cleared
-      soundManager.playClear(1 + (tilesCleared - 3) * 0.2);
+      soundManager.playClear(1 + (clearedCount - 3) * 0.2);
     }
 
     // Show clear message for big clears
-    if (tilesCleared >= 4 && !reward.isCritical) {
-      setCriticalMessage(tilesCleared >= 5 ? 'MASSIVE CLEAR!' : 'GREAT CLEAR!');
+    if (clearedCount >= 4 && !reward.isCritical) {
+      setCriticalMessage(clearedCount >= 5 ? 'MASSIVE CLEAR!' : 'GREAT CLEAR!');
       setTimeout(() => setCriticalMessage(null), 800);
     }
 
@@ -388,7 +512,7 @@ export default function GameBoard({ onHome, onHelp }) {
         setShake(false);
       }, 1000);
     }
-  }, [combo, lastClearTime, tiles, initSound]);
+  }, [combo, lastClearTime, tiles, initSound, isGameOver, maxCombo]);
 
   // ============================================
   // AUTO-CLEAR DETECTION
@@ -531,16 +655,43 @@ export default function GameBoard({ onHome, onHelp }) {
             </div>
           </motion.div>
 
-          {/* Control Buttons */}
-          <div className="flex flex-wrap gap-2">
-            <motion.button
-              className={`
-                chamfer-sm px-3 py-2 border-2 font-rajdhani font-bold tracking-wider text-xs
-                ${isPaused
-                  ? 'bg-neon-amber border-neon-amber text-void-black'
-                  : 'bg-void-surface border-void-border text-text-muted hover:border-neon-cyan hover:text-neon-cyan'
-                }
-              `}
+          {/* Difficulty & Controls */}
+          <div className="flex flex-col items-end gap-2">
+            {/* Difficulty Indicator */}
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-text-muted font-rajdhani tracking-wider">LVL</span>
+              <div className="flex gap-0.5">
+                {Array.from({ length: 10 }).map((_, i) => (
+                  <motion.div
+                    key={i}
+                    className="w-2 h-3 rounded-sm"
+                    style={{
+                      backgroundColor: i < difficultyLevel ? '#a855f7' : '#1a1a28',
+                      boxShadow: i < difficultyLevel ? '0 0 4px #a855f7' : 'none',
+                    }}
+                    animate={{
+                      scale: i === difficultyLevel - 1 ? [1, 1.2, 1] : 1,
+                    }}
+                    transition={{ duration: 0.3 }}
+                  />
+                ))}
+              </div>
+              {streak > 0 && (
+                <span className="text-order ml-2" title={`${streak} day streak`}>
+                  {streak}d
+                </span>
+              )}
+            </div>
+            {/* Control Buttons */}
+            <div className="flex flex-wrap gap-2">
+              <motion.button
+                className={`
+                  chamfer-sm px-3 py-2 border-2 font-rajdhani font-bold tracking-wider text-xs
+                  ${isPaused
+                    ? 'bg-neon-amber border-neon-amber text-void-black'
+                    : 'bg-void-surface border-void-border text-text-muted hover:border-neon-cyan hover:text-neon-cyan'
+                  }
+                `}
               style={{
                 boxShadow: isPaused ? '0 0 20px #ffb000' : 'none',
               }}
@@ -592,6 +743,7 @@ export default function GameBoard({ onHome, onHelp }) {
             >
               HOME
             </motion.button>
+            </div>
           </div>
         </div>
 
@@ -662,7 +814,7 @@ export default function GameBoard({ onHome, onHelp }) {
 
         {/* Pause Overlay */}
         <AnimatePresence>
-          {isPaused && (
+          {isPaused && !isGameOver && (
             <motion.div
               className="fixed inset-0 bg-void-black/80 flex items-center justify-center z-50"
               initial={{ opacity: 0 }}
@@ -694,6 +846,122 @@ export default function GameBoard({ onHome, onHelp }) {
                 >
                   RESUME
                 </motion.button>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Game Over Overlay */}
+        <AnimatePresence>
+          {isGameOver && (
+            <motion.div
+              className="fixed inset-0 bg-void-black/95 flex items-center justify-center z-50"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              <motion.div
+                className="text-center max-w-md mx-4"
+                initial={{ scale: 0.8, y: 30 }}
+                animate={{ scale: 1, y: 0 }}
+                transition={{ delay: 0.2, type: 'spring', stiffness: 200 }}
+              >
+                {/* Game Over Title */}
+                <motion.div
+                  className="text-impact text-5xl md:text-6xl text-chaos mb-2"
+                  style={{ textShadow: '0 0 40px #ff3366, 0 0 80px #ff3366' }}
+                  animate={{
+                    textShadow: [
+                      '0 0 40px #ff3366, 0 0 80px #ff3366',
+                      '0 0 60px #ff3366, 0 0 120px #ff3366',
+                      '0 0 40px #ff3366, 0 0 80px #ff3366',
+                    ],
+                  }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                >
+                  ENTROPY OVERFLOW
+                </motion.div>
+                <div className="text-text-muted text-lg mb-6">System collapse imminent...</div>
+
+                {/* Stats Card */}
+                <motion.div
+                  className="chamfer-lg bg-void-surface border-2 border-neon-cyan p-6 mb-6"
+                  style={{ boxShadow: '0 0 30px #00f0ff' }}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.4 }}
+                >
+                  <div className="grid grid-cols-2 gap-4 text-left">
+                    <div>
+                      <div className="text-xs text-text-muted font-rajdhani tracking-wider">FINAL SCORE</div>
+                      <div className="text-2xl font-bold text-white">{score.toLocaleString()}</div>
+                      {score >= highScore && score > 0 && (
+                        <div className="text-xs text-neon-amber">NEW HIGH SCORE!</div>
+                      )}
+                    </div>
+                    <div>
+                      <div className="text-xs text-text-muted font-rajdhani tracking-wider">SURVIVAL TIME</div>
+                      <div className="text-2xl font-bold text-white">
+                        {Math.floor(gameTime / 60000)}:{((gameTime % 60000) / 1000).toFixed(0).padStart(2, '0')}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-text-muted font-rajdhani tracking-wider">MAX COMBO</div>
+                      <div className="text-2xl font-bold text-neon-amber">x{maxCombo}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-text-muted font-rajdhani tracking-wider">TILES CLEARED</div>
+                      <div className="text-2xl font-bold text-neon-cyan">{tilesCleared}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-text-muted font-rajdhani tracking-wider">DIFFICULTY</div>
+                      <div className="text-2xl font-bold text-neon-violet">{difficultyLevel}/10</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-text-muted font-rajdhani tracking-wider">DAILY STREAK</div>
+                      <div className="text-2xl font-bold text-order">
+                        {streak > 0 ? `${streak} days` : '--'}
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+
+                {/* Action Buttons */}
+                <motion.div
+                  className="flex flex-col gap-3"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.6 }}
+                >
+                  <motion.button
+                    className="chamfer-sm bg-neon-cyan text-void-black px-8 py-4 font-rajdhani font-bold text-xl tracking-wider w-full"
+                    style={{ boxShadow: '0 0 30px #00f0ff' }}
+                    whileHover={{ scale: 1.02, boxShadow: '0 0 50px #00f0ff' }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={restartGame}
+                  >
+                    PLAY AGAIN
+                  </motion.button>
+
+                  <motion.button
+                    className="chamfer-sm bg-void-surface border-2 border-neon-violet text-neon-violet px-8 py-3 font-rajdhani font-bold text-lg tracking-wider w-full relative"
+                    whileHover={{ scale: 1.02, boxShadow: '0 0 20px #a855f7' }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={shareResults}
+                  >
+                    {showShareCopied ? 'COPIED!' : 'SHARE RESULTS'}
+                  </motion.button>
+
+                  <motion.button
+                    className="chamfer-sm bg-void-surface border-2 border-void-border text-text-muted px-8 py-3 font-rajdhani font-bold text-lg tracking-wider w-full hover:border-neon-magenta hover:text-neon-magenta"
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={onHome}
+                  >
+                    HOME
+                  </motion.button>
+                </motion.div>
               </motion.div>
             </motion.div>
           )}
