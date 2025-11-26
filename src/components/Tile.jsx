@@ -120,6 +120,8 @@ export default function Tile({
   isClearable,
   isSelected = false,
   cellSize = 60,
+  isNew = false, // Flag for newly spawned tiles
+  spawnDelay = 0, // Stagger spawn animations
 }) {
   const [isHovered, setIsHovered] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -128,6 +130,24 @@ export default function Tile({
 
   const config = TILE_CONFIG[tile.type] || TILE_CONFIG.cyan;
   const iconSize = Math.max(24, cellSize * 0.5);
+
+  // Spawn animation: fall from above if new tile
+  const spawnAnimation = isNew
+    ? {
+        initial: { y: -(cellSize * 2), scale: 0.8, opacity: 0 },
+        animate: { y: 0, scale: 1, opacity: 1 },
+        transition: {
+          type: 'spring',
+          stiffness: 300,
+          damping: 20,
+          delay: spawnDelay,
+        },
+      }
+    : {
+        initial: { scale: 0.8, opacity: 0 },
+        animate: { scale: 1, opacity: 1 },
+        transition: SPRING_CONFIG,
+      };
 
   // Handle click/tap - clear if clearable
   const handleClick = () => {
@@ -226,16 +246,17 @@ export default function Tile({
   return (
     <motion.div
       ref={tileRef}
-      className="absolute inset-0 cursor-pointer select-none"
+      className="absolute inset-0 cursor-pointer select-none overflow-visible"
       style={{ perspective: '200px' }}
-      initial={{ scale: 0, rotateY: 90, opacity: 0 }}
-      animate={{
-        scale: 1,
-        rotateY: 0,
-        opacity: 1,
+      initial={spawnAnimation.initial}
+      animate={spawnAnimation.animate}
+      exit={{
+        scale: [1, 1.3, 0],
+        opacity: [1, 1, 0],
+        rotate: [0, Math.random() > 0.5 ? 15 : -15, 0],
+        filter: ['brightness(1)', 'brightness(2)', 'brightness(0)'],
       }}
-      exit={{ scale: 0, rotateY: -90, opacity: 0 }}
-      transition={SPRING_CONFIG}
+      transition={spawnAnimation.transition}
       whileHover={{ scale: 1.05 }}
       whileTap={{ scale: 0.95 }}
       onMouseEnter={() => setIsHovered(true)}

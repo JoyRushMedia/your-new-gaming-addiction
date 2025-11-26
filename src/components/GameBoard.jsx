@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Tile from './Tile';
 import ParticleBurst from './ParticleBurst';
+import ScorePopup from './ScorePopup';
 import {
   calculateReward,
   calculateEntropySpawn,
@@ -52,6 +53,9 @@ export default function GameBoard({ onHome, onHelp }) {
   const [criticalMessage, setCriticalMessage] = useState(null);
   const [shake, setShake] = useState(false);
   const [particleBursts, setParticleBursts] = useState([]);
+  const [scorePopups, setScorePopups] = useState([]);
+  const [screenFlash, setScreenFlash] = useState(null);
+  const [newTileIds, setNewTileIds] = useState(new Set()); // Track newly spawned tiles
   const [isPaused, setIsPaused] = useState(false);
   const [highScore, setHighScore] = useState(() => {
     try {
@@ -257,7 +261,8 @@ export default function GameBoard({ onHome, onHelp }) {
     tileIdCounter = 0;
 
     const initialTiles = [];
-    for (let i = 0; i < 12; i++) {
+    // Spawn 24 tiles for immediate playability
+    for (let i = 0; i < 24; i++) {
       const position = generateRandomPosition(GRID_SIZE, initialTiles);
       if (position) {
         initialTiles.push({
@@ -278,6 +283,8 @@ export default function GameBoard({ onHome, onHelp }) {
     setCriticalMessage(null);
     setShake(false);
     setParticleBursts([]);
+    setScorePopups([]);
+    setScreenFlash(null);
     setIsPaused(false);
     setComboTimeLeft(0);
     setIsGameOver(false);
@@ -290,6 +297,9 @@ export default function GameBoard({ onHome, onHelp }) {
     cascadeLevelRef.current = 0;
     setSelectedTile(null);
     lastDifficultyLevel.current = 1;
+    // Mark initial tiles as new for animation
+    setNewTileIds(new Set(initialTiles.map(t => t.id)));
+    setTimeout(() => setNewTileIds(new Set()), 1500);
   }, []);
 
   // ============================================
@@ -382,7 +392,9 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
 
   useEffect(() => {
     const initialTiles = [];
-    for (let i = 0; i < 12; i++) {
+    // Spawn 24 tiles initially for immediate playability
+    // This ensures matches are available right from the start
+    for (let i = 0; i < 24; i++) {
       const position = generateRandomPosition(GRID_SIZE, initialTiles);
       if (position) {
         initialTiles.push({
@@ -394,6 +406,10 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
       }
     }
     setTiles(initialTiles);
+    // Mark initial tiles as new for staggered fall-in animation
+    setNewTileIds(new Set(initialTiles.map(t => t.id)));
+    // Clear new tile flags after animation completes
+    setTimeout(() => setNewTileIds(new Set()), 1500);
   }, []);
 
   // ============================================
@@ -431,11 +447,11 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
         const spawnCount = calculateEntropySpawn(prevTiles.length, GRID_SIZE);
         if (spawnCount === 0) return prevTiles;
 
-        const newTiles = [];
+        const spawnedTiles = [];
         const allTiles = [...prevTiles];
 
         for (let i = 0; i < spawnCount; i++) {
-          const position = generateRandomPosition(GRID_SIZE, [...allTiles, ...newTiles]);
+          const position = generateRandomPosition(GRID_SIZE, [...allTiles, ...spawnedTiles]);
           if (position) {
             const newTile = {
               id: tileIdCounter++,
@@ -443,16 +459,30 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
               y: position.y,
               type: generateRandomTileType(),
             };
-            newTiles.push(newTile);
+            spawnedTiles.push(newTile);
           }
         }
 
-        if (newTiles.length > 0) {
+        if (spawnedTiles.length > 0) {
           soundManager.playSpawn();
+          // Mark spawned tiles as new for fall animation
+          setNewTileIds(prev => {
+            const updated = new Set(prev);
+            spawnedTiles.forEach(t => updated.add(t.id));
+            return updated;
+          });
+          // Clear new flag after animation
+          setTimeout(() => {
+            setNewTileIds(prev => {
+              const updated = new Set(prev);
+              spawnedTiles.forEach(t => updated.delete(t.id));
+              return updated;
+            });
+          }, 800);
         }
 
-        if (newTiles.length === 0) return prevTiles;
-        return [...prevTiles, ...newTiles];
+        if (spawnedTiles.length === 0) return prevTiles;
+        return [...prevTiles, ...spawnedTiles];
       });
     }, spawnDelay);
 
@@ -467,6 +497,32 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
   // ============================================
   // CASCADE PROCESSING
   // ============================================
+
+  // Helper to create score popup at tile location
+  const createScorePopup = useCallback((tileId, points, comboLevel, isChain, tileType) => {
+    const gridElement = gameBoardRef.current?.querySelector(`[data-tile-id="${tileId}"]`);
+    if (gridElement) {
+      const rect = gridElement.getBoundingClientRect();
+      const popupId = Date.now() + Math.random();
+      const color = tileType === 'cyan' ? '#00f0ff' :
+                    tileType === 'magenta' ? '#ff00ff' :
+                    tileType === 'amber' ? '#ffb000' : '#a855f7';
+
+      setScorePopups(prev => [...prev, {
+        id: popupId,
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+        points,
+        combo: comboLevel,
+        isChain,
+        color,
+      }]);
+
+      setTimeout(() => {
+        setScorePopups(prev => prev.filter(p => p.id !== popupId));
+      }, 1300);
+    }
+  }, []);
 
   const processCascadeStep = useCallback((tilesToClear, currentCascadeLevel) => {
     if (tilesToClear.length === 0) {
@@ -487,6 +543,24 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
 
     setScore(prev => prev + reward.points);
     setTilesCleared(prev => prev + tilesToClear.length);
+
+    // Create score popup at first cleared tile
+    if (tilesToClear.length > 0) {
+      const firstTileId = tilesToClear[0];
+      const firstTile = tiles.find(t => t.id === firstTileId);
+      if (firstTile) {
+        createScorePopup(firstTileId, reward.points, combo, currentCascadeLevel > 0, firstTile.type);
+      }
+    }
+
+    // Screen flash for big combos or cascades
+    if (combo >= 3 || currentCascadeLevel >= 1 || tilesToClear.length >= 5) {
+      const flashColor = combo >= 5 ? '#ffb000' :
+                         currentCascadeLevel >= 2 ? '#a855f7' :
+                         tilesToClear.length >= 5 ? '#00f0ff' : '#ffffff';
+      setScreenFlash(flashColor);
+      setTimeout(() => setScreenFlash(null), 150);
+    }
 
     if (reward.message) {
       setCriticalMessage(reward.message);
@@ -529,7 +603,7 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
         return newTiles;
       });
     }, GAME_CONFIG.CLEAR_ANIMATION_MS);
-  }, [combo]);
+  }, [combo, tiles, createScorePopup]);
 
   // ============================================
   // SWAP HANDLER
@@ -970,6 +1044,8 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
                           isClearable={clearableTileIds.includes(tile.id)}
                           isSelected={selectedTile === tile.id}
                           cellSize={cellSize}
+                          isNew={newTileIds.has(tile.id)}
+                          spawnDelay={(tile.y * 0.05) + (tile.x * 0.02)}
                         />
                       )}
                     </AnimatePresence>
@@ -997,6 +1073,35 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
             onComplete={() => setParticleBursts(prev => prev.filter(b => b.id !== burst.id))}
           />
         ))}
+      </AnimatePresence>
+
+      {/* Score Popups */}
+      <AnimatePresence>
+        {scorePopups.map(popup => (
+          <ScorePopup
+            key={popup.id}
+            x={popup.x}
+            y={popup.y}
+            points={popup.points}
+            combo={popup.combo}
+            isChain={popup.isChain}
+            color={popup.color}
+          />
+        ))}
+      </AnimatePresence>
+
+      {/* Screen Flash Effect */}
+      <AnimatePresence>
+        {screenFlash && (
+          <motion.div
+            className="fixed inset-0 pointer-events-none z-[90]"
+            style={{ backgroundColor: screenFlash }}
+            initial={{ opacity: 0.4 }}
+            animate={{ opacity: 0 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+          />
+        )}
       </AnimatePresence>
     </div>
   );
