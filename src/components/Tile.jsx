@@ -130,6 +130,7 @@ export default function Tile({
   gridGap = 4,
   isNew = false,
   isSwapping = false,
+  isHinted = false,
 }) {
   const [isHovered, setIsHovered] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -364,7 +365,7 @@ export default function Tile({
         )}
 
         {/* Clearable indicator ring */}
-        {isClearable && !isSelected && (
+        {isClearable && !isSelected && !isHinted && (
           <motion.div
             className="absolute inset-[-2px] pointer-events-none rounded-xl"
             style={{
@@ -376,6 +377,26 @@ export default function Tile({
             }}
             transition={{
               duration: 0.8,
+              repeat: Infinity,
+              ease: 'easeInOut',
+            }}
+          />
+        )}
+
+        {/* Hint indicator - pulsing gold ring */}
+        {isHinted && (
+          <motion.div
+            className="absolute inset-[-4px] pointer-events-none rounded-xl"
+            style={{
+              border: '3px solid #ffd700',
+              boxShadow: '0 0 20px #ffd700, inset 0 0 10px #ffd70050',
+            }}
+            animate={{
+              scale: [1, 1.08, 1],
+              opacity: [0.8, 1, 0.8],
+            }}
+            transition={{
+              duration: 0.5,
               repeat: Infinity,
               ease: 'easeInOut',
             }}

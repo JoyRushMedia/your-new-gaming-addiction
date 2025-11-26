@@ -540,6 +540,78 @@ export function findClearableTiles(tiles, gridSize) {
   return Array.from(clearable);
 }
 
+/**
+ * Find all valid swap moves that would create a match
+ * Returns array of {tile1, tile2, direction} objects
+ */
+export function findValidMoves(tiles, gridSize) {
+  const validMoves = [];
+  const grid = createGridMap(tiles);
+
+  // Check all possible horizontal and vertical swaps
+  for (const tile of tiles) {
+    const directions = [
+      { dx: 1, dy: 0, dir: 'right' },
+      { dx: 0, dy: 1, dir: 'down' },
+    ];
+
+    for (const { dx, dy, dir } of directions) {
+      const targetX = tile.x + dx;
+      const targetY = tile.y + dy;
+
+      // Check bounds
+      if (targetX >= gridSize || targetY >= gridSize) continue;
+
+      const targetKey = `${targetX},${targetY}`;
+      const targetTile = grid[targetKey];
+      if (!targetTile) continue;
+
+      // Simulate the swap
+      const swappedTiles = tiles.map(t => {
+        if (t.id === tile.id) return { ...t, x: targetX, y: targetY };
+        if (t.id === targetTile.id) return { ...t, x: tile.x, y: tile.y };
+        return t;
+      });
+
+      // Check if swap creates a match
+      const matches = findClearableTiles(swappedTiles, gridSize);
+      if (matches.length > 0) {
+        validMoves.push({
+          tile1: tile,
+          tile2: targetTile,
+          direction: dir,
+        });
+      }
+    }
+  }
+
+  return validMoves;
+}
+
+/**
+ * Shuffle tiles on the board to create new possibilities
+ * Ensures at least one valid move exists after shuffle
+ */
+export function shuffleTiles(tiles, gridSize) {
+  const types = ['cyan', 'magenta', 'amber', 'violet'];
+  let shuffled = tiles.map(t => ({
+    ...t,
+    type: types[Math.floor(Math.random() * types.length)],
+  }));
+
+  // Keep shuffling until we have at least one valid move
+  let attempts = 0;
+  while (findValidMoves(shuffled, gridSize).length === 0 && attempts < 100) {
+    shuffled = tiles.map(t => ({
+      ...t,
+      type: types[Math.floor(Math.random() * types.length)],
+    }));
+    attempts++;
+  }
+
+  return shuffled;
+}
+
 // ============================================
 // GRAVITY SYSTEM
 // ============================================

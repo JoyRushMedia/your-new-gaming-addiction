@@ -19,6 +19,8 @@ import {
   recordPlay,
   applyGravity,
   findAllMatches,
+  findValidMoves,
+  shuffleTiles,
   GAME_CONFIG,
 } from '../lib/gameLogic';
 import {
@@ -166,6 +168,49 @@ export default function GameBoard({
     if (gamePhase !== GAME_PHASE.IDLE) return [];
     return findClearableTiles(tiles, GRID_SIZE);
   }, [tiles, gamePhase]);
+
+  // Find valid swap moves (for hint system and detecting "no moves" state)
+  const validMoves = useMemo(() => {
+    if (gamePhase !== GAME_PHASE.IDLE) return [];
+    return findValidMoves(tiles, GRID_SIZE);
+  }, [tiles, gamePhase]);
+
+  // Track hint tiles to highlight
+  const [hintTileIds, setHintTileIds] = useState(new Set());
+  const [showNoMoves, setShowNoMoves] = useState(false);
+
+  // Check for no valid moves (no clearable tiles AND no valid swaps)
+  const hasNoMoves = useMemo(() => {
+    return clearableTileIds.length === 0 && validMoves.length === 0 && tiles.length >= 6;
+  }, [clearableTileIds, validMoves, tiles.length]);
+
+  // Show hint - highlight a random valid move
+  const showHint = useCallback(() => {
+    if (validMoves.length > 0) {
+      const randomMove = validMoves[Math.floor(Math.random() * validMoves.length)];
+      setHintTileIds(new Set([randomMove.tile1.id, randomMove.tile2.id]));
+      // Clear hint after 2 seconds
+      setTimeout(() => setHintTileIds(new Set()), 2000);
+    }
+  }, [validMoves]);
+
+  // Shuffle the board when no moves available
+  const handleShuffle = useCallback(() => {
+    if (gamePhase !== GAME_PHASE.IDLE) return;
+    const shuffled = shuffleTiles(tiles, GRID_SIZE);
+    setTiles(shuffled);
+    setShowNoMoves(false);
+    soundManager.playSpawn();
+  }, [tiles, gamePhase]);
+
+  // Show "No Moves" notification when stuck
+  useEffect(() => {
+    if (hasNoMoves && !isPaused && !isGameOver && gamePhase === GAME_PHASE.IDLE) {
+      setShowNoMoves(true);
+    } else {
+      setShowNoMoves(false);
+    }
+  }, [hasNoMoves, isPaused, isGameOver, gamePhase]);
 
   const gridPixelSize = cellSize * GRID_SIZE + (GRID_SIZE - 1) * 4; // cells + gaps
 
@@ -937,124 +982,196 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
         )}
 
         {/* Compact Header Stats */}
-        <div className="flex flex-wrap justify-between items-center mb-2 md:mb-4 gap-2">
-          {/* Score */}
-          <div className="flex items-center gap-4">
+        <div className="flex flex-wrap justify-between items-center mb-3 gap-2">
+          {/* Left Side - Main Stats */}
+          <div className="flex items-center gap-3">
+            {/* Score Box */}
             <motion.div
-              className="bg-void-surface/80 border border-neon-cyan rounded-lg px-3 py-1.5"
-              style={{ boxShadow: '0 0 15px #00f0ff40' }}
+              className="bg-void-surface/90 border-2 border-neon-cyan rounded-xl px-4 py-2 min-w-[120px]"
+              style={{ boxShadow: '0 0 20px #00f0ff50' }}
             >
-              <div className="text-[10px] text-neon-cyan font-rajdhani tracking-wider">SCORE</div>
+              <div className="text-xs text-neon-cyan font-rajdhani tracking-widest uppercase">Score</div>
               <motion.div
-                className="text-lg md:text-xl font-bold text-white"
+                className="text-2xl md:text-3xl font-impact text-white"
                 key={score}
-                initial={{ scale: 1.2, color: '#00f0ff' }}
+                initial={{ scale: 1.3, color: '#00f0ff' }}
                 animate={{ scale: 1, color: '#ffffff' }}
+                transition={{ duration: 0.2 }}
               >
                 {score.toLocaleString()}
               </motion.div>
+              {highScore > 0 && score < highScore && (
+                <div className="text-[10px] text-text-muted font-rajdhani">
+                  BEST: {highScore.toLocaleString()}
+                </div>
+              )}
+              {score > 0 && score >= highScore && (
+                <div className="text-[10px] text-neon-amber font-rajdhani animate-pulse">
+                  ★ NEW BEST
+                </div>
+              )}
             </motion.div>
 
-            {/* Combo */}
+            {/* Combo Box */}
             <motion.div
-              className="bg-void-surface/80 border rounded-lg px-3 py-1.5"
+              className="bg-void-surface/90 border-2 rounded-xl px-4 py-2 min-w-[90px]"
               style={{
-                borderColor: combo > 0 ? '#ffb000' : '#1a1a28',
-                boxShadow: combo > 0 ? '0 0 15px #ffb00040' : 'none',
+                borderColor: combo > 0 ? '#ffb000' : '#2a2a3a',
+                boxShadow: combo > 0 ? '0 0 25px #ffb00060' : 'none',
               }}
+              animate={{ scale: combo > 2 ? [1, 1.05, 1] : 1 }}
+              transition={{ duration: 0.3, repeat: combo > 2 ? Infinity : 0 }}
             >
-              <div className="text-[10px] text-neon-amber font-rajdhani tracking-wider">COMBO</div>
-              <div className="text-lg md:text-xl font-bold text-white">
-                {combo > 0 ? `x${combo}` : '--'}
+              <div className="text-xs font-rajdhani tracking-widest uppercase" style={{ color: combo > 0 ? '#ffb000' : '#666' }}>
+                Combo
+              </div>
+              <div className="text-2xl md:text-3xl font-impact" style={{ color: combo > 0 ? '#ffffff' : '#444' }}>
+                {combo > 0 ? `×${combo}` : '—'}
               </div>
               {combo > 0 && (
-                <div className="h-0.5 bg-void-deep rounded-full overflow-hidden mt-1">
+                <div className="h-1 bg-void-deep rounded-full overflow-hidden mt-1">
                   <motion.div
-                    className="h-full bg-neon-amber"
+                    className="h-full bg-gradient-to-r from-neon-amber to-yellow-300"
                     animate={{ width: `${comboTimeLeft}%` }}
+                    transition={{ duration: 0.1 }}
                   />
                 </div>
               )}
             </motion.div>
 
-            {/* Entropy */}
+            {/* Tiles Cleared */}
             <motion.div
-              className="bg-void-surface/80 border rounded-lg px-3 py-1.5"
-              style={{
-                borderColor: entropyLevel > 70 ? '#ff3366' : '#1a1a28',
-                boxShadow: entropyLevel > 70 ? '0 0 15px #ff336640' : 'none',
-              }}
-              animate={{ scale: entropyLevel > 80 ? [1, 1.02, 1] : 1 }}
-              transition={{ duration: 0.5, repeat: entropyLevel > 80 ? Infinity : 0 }}
+              className="bg-void-surface/90 border-2 border-neon-violet/50 rounded-xl px-4 py-2 min-w-[80px]"
+              style={{ boxShadow: '0 0 15px #a855f720' }}
             >
-              <div className="text-[10px] text-chaos font-rajdhani tracking-wider">ENTROPY</div>
-              <div className="flex items-center gap-2">
-                <span className="text-lg md:text-xl font-bold text-white">{entropyLevel}%</span>
-                <div className="w-16 h-1.5 bg-void-deep rounded-full overflow-hidden">
-                  <motion.div
-                    className="h-full bg-gradient-to-r from-order to-chaos"
-                    animate={{ width: `${entropyLevel}%` }}
-                  />
-                </div>
-              </div>
+              <div className="text-xs text-neon-violet font-rajdhani tracking-widest uppercase">Cleared</div>
+              <motion.div
+                className="text-2xl md:text-3xl font-impact text-white"
+                key={tilesCleared}
+                initial={{ scale: 1.2 }}
+                animate={{ scale: 1 }}
+              >
+                {tilesCleared}
+              </motion.div>
             </motion.div>
           </div>
 
-          {/* Controls */}
-          <div className="flex items-center gap-1">
-            <div className="flex gap-0.5 mr-2">
-              {Array.from({ length: 10 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="w-1.5 h-3 rounded-sm"
+          {/* Right Side - Entropy + Controls */}
+          <div className="flex items-center gap-3">
+            {/* Entropy Meter - Larger and more prominent */}
+            <motion.div
+              className="bg-void-surface/90 border-2 rounded-xl px-4 py-2 min-w-[140px]"
+              style={{
+                borderColor: entropyLevel > 70 ? '#ff3366' : entropyLevel > 40 ? '#ffb000' : '#22c55e',
+                boxShadow: entropyLevel > 70 ? '0 0 25px #ff336660' : '0 0 15px #00f0ff20',
+              }}
+              animate={{
+                scale: entropyLevel > 85 ? [1, 1.02, 1] : 1,
+                borderColor: entropyLevel > 85 ? ['#ff3366', '#ff6688', '#ff3366'] : undefined,
+              }}
+              transition={{ duration: 0.4, repeat: entropyLevel > 85 ? Infinity : 0 }}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-rajdhani tracking-widest uppercase"
+                  style={{ color: entropyLevel > 70 ? '#ff3366' : entropyLevel > 40 ? '#ffb000' : '#22c55e' }}>
+                  Entropy
+                </span>
+                <span className="text-xl font-impact text-white">
+                  {entropyLevel}%
+                </span>
+              </div>
+              <div className="h-2 bg-void-deep rounded-full overflow-hidden mt-1">
+                <motion.div
+                  className="h-full rounded-full"
                   style={{
-                    backgroundColor: i < difficultyLevel ? '#a855f7' : '#1a1a28',
-                    boxShadow: i < difficultyLevel ? '0 0 4px #a855f7' : 'none',
+                    background: entropyLevel > 70
+                      ? 'linear-gradient(90deg, #ff6666, #ff3366)'
+                      : entropyLevel > 40
+                        ? 'linear-gradient(90deg, #22c55e, #ffb000)'
+                        : 'linear-gradient(90deg, #22c55e, #4ade80)',
                   }}
+                  animate={{ width: `${entropyLevel}%` }}
+                  transition={{ duration: 0.3 }}
                 />
-              ))}
+              </div>
+              <div className="text-[9px] text-text-muted mt-0.5 text-center font-rajdhani">
+                {entropyLevel > 80 ? '⚠ CRITICAL' : entropyLevel > 60 ? 'HIGH' : entropyLevel > 30 ? 'STABLE' : 'LOW'}
+              </div>
+            </motion.div>
+
+            {/* Hint Button */}
+            {validMoves.length > 0 && clearableTileIds.length === 0 && (
+              <motion.button
+                className="bg-gradient-to-r from-yellow-600 to-amber-500 border-2 border-yellow-400 rounded-xl px-3 py-2 text-sm font-rajdhani font-bold text-white shadow-lg"
+                style={{ boxShadow: '0 0 15px #ffd70060' }}
+                whileHover={{ scale: 1.05, boxShadow: '0 0 25px #ffd700' }}
+                whileTap={{ scale: 0.95 }}
+                onClick={showHint}
+              >
+                💡 HINT
+              </motion.button>
+            )}
+
+            {/* Control Buttons */}
+            <div className="flex flex-col gap-1">
+              <div className="flex gap-1">
+                <motion.button
+                  className="bg-void-surface border border-void-border rounded-lg w-8 h-8 flex items-center justify-center text-text-muted hover:border-neon-cyan hover:text-neon-cyan"
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={togglePause}
+                >
+                  {isPaused ? '▶' : '⏸'}
+                </motion.button>
+                <motion.button
+                  className="bg-void-surface border border-void-border rounded-lg w-8 h-8 flex items-center justify-center text-text-muted hover:border-chaos hover:text-chaos"
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={restartGame}
+                >
+                  ↻
+                </motion.button>
+              </div>
+              <div className="flex gap-1">
+                <motion.button
+                  className={`bg-void-surface border rounded-lg w-8 h-8 flex items-center justify-center ${soundEnabled ? 'border-order text-order' : 'border-void-border text-text-muted'}`}
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => { initSound(); toggleSound(); }}
+                >
+                  {soundEnabled ? '♪' : '🔇'}
+                </motion.button>
+                <motion.button
+                  className="bg-void-surface border border-void-border rounded-lg w-8 h-8 flex items-center justify-center text-text-muted hover:border-neon-magenta hover:text-neon-magenta"
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={onHome}
+                >
+                  ✕
+                </motion.button>
+              </div>
             </div>
-            <motion.button
-              className="bg-void-surface border border-void-border rounded px-2 py-1 text-text-muted text-xs font-rajdhani hover:border-neon-cyan hover:text-neon-cyan"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={togglePause}
-            >
-              {isPaused ? '▶' : '⏸'}
-            </motion.button>
-            <motion.button
-              className="bg-void-surface border border-void-border rounded px-2 py-1 text-text-muted text-xs font-rajdhani hover:border-chaos hover:text-chaos"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={restartGame}
-            >
-              ↻
-            </motion.button>
-            <motion.button
-              className={`bg-void-surface border rounded px-2 py-1 text-xs font-rajdhani ${soundEnabled ? 'border-order text-order' : 'border-void-border text-text-muted'}`}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => { initSound(); toggleSound(); }}
-            >
-              {soundEnabled ? '♪' : '♪̸'}
-            </motion.button>
-            <motion.button
-              className="bg-void-surface border border-void-border rounded px-2 py-1 text-text-muted text-xs font-rajdhani hover:border-neon-violet hover:text-neon-violet"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={onHelp}
-            >
-              ?
-            </motion.button>
-            <motion.button
-              className="bg-void-surface border border-void-border rounded px-2 py-1 text-text-muted text-xs font-rajdhani hover:border-neon-magenta hover:text-neon-magenta"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={onHome}
-            >
-              ✕
-            </motion.button>
           </div>
+        </div>
+
+        {/* Difficulty/Progress Bar */}
+        <div className="mb-3 flex items-center gap-3">
+          <div className="text-xs text-text-muted font-rajdhani uppercase tracking-wider">Level</div>
+          <div className="flex gap-1 flex-1">
+            {Array.from({ length: 10 }).map((_, i) => (
+              <motion.div
+                key={i}
+                className="flex-1 h-2 rounded-sm"
+                style={{
+                  backgroundColor: i < difficultyLevel ? '#a855f7' : '#1a1a28',
+                  boxShadow: i < difficultyLevel ? '0 0 8px #a855f7' : 'none',
+                }}
+                animate={i === difficultyLevel - 1 ? { opacity: [1, 0.5, 1] } : {}}
+                transition={{ duration: 0.5, repeat: Infinity }}
+              />
+            ))}
+          </div>
+          <div className="text-sm font-rajdhani text-neon-violet font-bold">{difficultyLevel}</div>
         </div>
 
         {/* Critical Message Overlay */}
@@ -1249,16 +1366,59 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
                     gridGap={4}
                     isNew={newTileIds.has(tile.id)}
                     isSwapping={swappingTileIds.has(tile.id)}
+                    isHinted={hintTileIds.has(tile.id)}
                   />
                 ))}
               </AnimatePresence>
             </div>
+
+            {/* No Moves Overlay */}
+            <AnimatePresence>
+              {showNoMoves && (
+                <motion.div
+                  className="absolute inset-0 bg-void-black/80 rounded-xl flex flex-col items-center justify-center z-20"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                >
+                  <motion.div
+                    className="text-center"
+                    initial={{ scale: 0.8, y: 20 }}
+                    animate={{ scale: 1, y: 0 }}
+                  >
+                    <div className="text-2xl font-impact text-neon-amber mb-2"
+                      style={{ textShadow: '0 0 20px #ffb000' }}>
+                      NO MOVES!
+                    </div>
+                    <div className="text-sm text-text-muted mb-4 font-rajdhani">
+                      No valid swaps available
+                    </div>
+                    <motion.button
+                      className="bg-gradient-to-r from-neon-violet to-purple-600 border-2 border-neon-violet rounded-xl px-6 py-3 text-lg font-rajdhani font-bold text-white"
+                      style={{ boxShadow: '0 0 25px #a855f760' }}
+                      whileHover={{ scale: 1.08, boxShadow: '0 0 35px #a855f7' }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={handleShuffle}
+                    >
+                      🔀 SHUFFLE
+                    </motion.button>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.div>
         </div>
 
-        {/* Footer */}
-        <div className="text-center text-text-muted text-xs py-2 font-exo">
-          DRAG or TAP to match • Chains = Bonus
+        {/* Footer - Instructions */}
+        <div className="text-center py-2">
+          <span className="text-text-muted text-xs font-exo">
+            SWIPE tiles to create matches • TAP clearable groups • Build chains for bonus
+          </span>
+          {validMoves.length > 0 && clearableTileIds.length === 0 && !showNoMoves && (
+            <span className="text-neon-amber text-xs font-rajdhani ml-2 animate-pulse">
+              • Swap to create match!
+            </span>
+          )}
         </div>
       </motion.div>
 
