@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import GameBoard from './components/GameBoard';
+import LevelSelect from './components/LevelSelect';
+import { getTotalStars, getMaxStars } from './lib/levels';
 
 /**
  * Main App Component
@@ -95,8 +97,9 @@ const TilePreview = ({ type, size = 40 }) => {
 };
 
 export default function App() {
-  const [gameState, setGameState] = useState('home'); // 'home', 'playing'
+  const [gameState, setGameState] = useState('home'); // 'home', 'playing', 'levelSelect', 'levelPlaying'
   const [showHelp, setShowHelp] = useState(false);
+  const [currentLevelId, setCurrentLevelId] = useState(null);
 
   const startGame = () => {
     setGameState('playing');
@@ -104,6 +107,21 @@ export default function App() {
 
   const goHome = () => {
     setGameState('home');
+    setCurrentLevelId(null);
+  };
+
+  const openLevelSelect = () => {
+    setGameState('levelSelect');
+  };
+
+  const startLevel = (levelId) => {
+    setCurrentLevelId(levelId);
+    setGameState('levelPlaying');
+  };
+
+  const handleNextLevel = (nextLevelId) => {
+    setCurrentLevelId(nextLevelId);
+    // State stays as 'levelPlaying', GameBoard will re-initialize with new level
   };
 
   return (
@@ -130,9 +148,15 @@ export default function App() {
       <div className="absolute bottom-0 right-0 w-24 md:w-32 h-24 md:h-32 border-r-2 border-b-2 border-neon-cyan opacity-20 pointer-events-none" />
 
       <AnimatePresence mode="wait">
-        {gameState === 'home' ? (
-          <HomeScreen key="home" onStart={startGame} onHelp={() => setShowHelp(true)} />
-        ) : (
+        {gameState === 'home' && (
+          <HomeScreen
+            key="home"
+            onStart={startGame}
+            onChallengeMode={openLevelSelect}
+            onHelp={() => setShowHelp(true)}
+          />
+        )}
+        {gameState === 'playing' && (
           <motion.div
             key="game"
             className="w-full h-full"
@@ -142,6 +166,39 @@ export default function App() {
             transition={{ duration: 0.3 }}
           >
             <GameBoard onHome={goHome} onHelp={() => setShowHelp(true)} />
+          </motion.div>
+        )}
+        {gameState === 'levelSelect' && (
+          <motion.div
+            key="levelSelect"
+            className="w-full h-full"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <LevelSelect
+              onSelectLevel={startLevel}
+              onBack={goHome}
+            />
+          </motion.div>
+        )}
+        {gameState === 'levelPlaying' && (
+          <motion.div
+            key={`level-${currentLevelId}`}
+            className="w-full h-full"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <GameBoard
+              onHome={goHome}
+              onHelp={() => setShowHelp(true)}
+              levelId={currentLevelId}
+              onNextLevel={handleNextLevel}
+              onLevelSelect={openLevelSelect}
+            />
           </motion.div>
         )}
       </AnimatePresence>
@@ -159,7 +216,9 @@ export default function App() {
 /**
  * Home Screen Component
  */
-function HomeScreen({ onStart, onHelp }) {
+function HomeScreen({ onStart, onChallengeMode, onHelp }) {
+  const totalStars = getTotalStars();
+  const maxStars = getMaxStars();
   return (
     <motion.div
       className="w-full h-full flex flex-col items-center justify-center p-4 md:p-8"
@@ -235,7 +294,30 @@ function HomeScreen({ onStart, onHelp }) {
           whileTap={{ scale: 0.95 }}
           onClick={onStart}
         >
-          START GAME
+          ENDLESS MODE
+        </motion.button>
+
+        {/* Challenge Mode - Primary feature for Zeigarnik effect */}
+        <motion.button
+          className="chamfer-sm bg-void-surface border-2 border-neon-amber text-neon-amber px-8 md:px-12 py-3 md:py-4 font-rajdhani font-bold text-lg md:text-xl tracking-wider relative overflow-hidden"
+          style={{ boxShadow: '0 0 25px #ffb00060' }}
+          whileHover={{ scale: 1.05, boxShadow: '0 0 40px #ffb000' }}
+          whileTap={{ scale: 0.95 }}
+          onClick={onChallengeMode}
+        >
+          {/* Shimmer effect */}
+          <motion.div
+            className="absolute inset-0 opacity-20"
+            style={{ background: 'linear-gradient(90deg, transparent, rgba(255,176,0,0.4), transparent)' }}
+            animate={{ x: ['-100%', '100%'] }}
+            transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+          />
+          <span className="relative z-10">CHALLENGE MODE</span>
+          {totalStars > 0 && (
+            <div className="text-xs opacity-80 relative z-10 mt-0.5">
+              {totalStars}/{maxStars} Stars
+            </div>
+          )}
         </motion.button>
 
         <motion.button

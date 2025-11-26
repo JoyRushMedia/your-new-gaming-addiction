@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import Tile from './Tile';
 import ParticleBurst from './ParticleBurst';
 import ScorePopup from './ScorePopup';
+import LevelComplete from './LevelComplete';
 import {
   calculateReward,
   calculateEntropySpawn,
@@ -20,6 +21,14 @@ import {
   findAllMatches,
   GAME_CONFIG,
 } from '../lib/gameLogic';
+import {
+  getLevel,
+  getWorldForLevel,
+  getGoalDescription,
+  calculateGoalProgress,
+  isGoalComplete,
+  completeLevel,
+} from '../lib/levels';
 import { soundManager } from '../lib/sounds';
 
 /**
@@ -38,7 +47,21 @@ const GAME_PHASE = {
   CASCADE_CHECK: 'cascade_check',
 };
 
-export default function GameBoard({ onHome, onHelp }) {
+export default function GameBoard({
+  onHome,
+  onHelp,
+  levelId = null, // null = endless mode, number = level mode
+  onNextLevel = null,
+  onLevelSelect = null,
+}) {
+  // ============================================
+  // LEVEL MODE DATA
+  // ============================================
+
+  const level = levelId ? getLevel(levelId) : null;
+  const world = level ? getWorldForLevel(levelId) : null;
+  const isLevelMode = !!level;
+
   // ============================================
   // STATE MANAGEMENT
   // ============================================
@@ -92,6 +115,12 @@ export default function GameBoard({ onHome, onHelp }) {
   const [gamePhase, setGamePhase] = useState(GAME_PHASE.IDLE);
   const cascadeLevelRef = useRef(0);
   const [selectedTile, setSelectedTile] = useState(null);
+
+  // Level Mode State
+  const [maxChain, setMaxChain] = useState(0); // Track max cascade chain
+  const [levelComplete, setLevelComplete] = useState(false);
+  const [levelCompleteData, setLevelCompleteData] = useState(null);
+  const [levelTimeRemaining, setLevelTimeRemaining] = useState(null);
 
   // Responsive grid sizing
   const [cellSize, setCellSize] = useState(70);
@@ -261,8 +290,10 @@ export default function GameBoard({ onHome, onHelp }) {
     tileIdCounter = 0;
 
     const initialTiles = [];
-    // Spawn 24 tiles for immediate playability
-    for (let i = 0; i < 24; i++) {
+    // Use level-specific initial tiles or default to 24 for endless
+    const initialCount = level?.initialTiles || 24;
+
+    for (let i = 0; i < initialCount; i++) {
       const position = generateRandomPosition(GRID_SIZE, initialTiles);
       if (position) {
         initialTiles.push({
@@ -297,10 +328,19 @@ export default function GameBoard({ onHome, onHelp }) {
     cascadeLevelRef.current = 0;
     setSelectedTile(null);
     lastDifficultyLevel.current = 1;
+    // Reset level-specific state
+    setMaxChain(0);
+    setLevelComplete(false);
+    setLevelCompleteData(null);
+    if (level?.maxTime) {
+      setLevelTimeRemaining(level.maxTime);
+    } else {
+      setLevelTimeRemaining(null);
+    }
     // Mark initial tiles as new for animation
     setNewTileIds(new Set(initialTiles.map(t => t.id)));
     setTimeout(() => setNewTileIds(new Set()), 1500);
-  }, []);
+  }, [level]);
 
   // ============================================
   // SHARE RESULTS
@@ -392,9 +432,10 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
 
   useEffect(() => {
     const initialTiles = [];
-    // Spawn 24 tiles initially for immediate playability
-    // This ensures matches are available right from the start
-    for (let i = 0; i < 24; i++) {
+    // Use level-specific initial tiles or default to 24 for endless
+    const initialCount = level?.initialTiles || 24;
+
+    for (let i = 0; i < initialCount; i++) {
       const position = generateRandomPosition(GRID_SIZE, initialTiles);
       if (position) {
         initialTiles.push({
@@ -410,7 +451,12 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
     setNewTileIds(new Set(initialTiles.map(t => t.id)));
     // Clear new tile flags after animation completes
     setTimeout(() => setNewTileIds(new Set()), 1500);
-  }, []);
+
+    // Initialize level time limit if applicable
+    if (level?.maxTime) {
+      setLevelTimeRemaining(level.maxTime);
+    }
+  }, [level]);
 
   // ============================================
   // ENTROPY LEVEL TRACKING
@@ -421,6 +467,87 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
     const newEntropyLevel = calculateEntropyLevel(tiles.length, maxTiles);
     setEntropyLevel(newEntropyLevel);
   }, [tiles]);
+
+  // ============================================
+  // LEVEL GOAL CHECKING (callback defined first for use in timer)
+  // ============================================
+
+  const handleLevelComplete = useCallback(() => {
+    if (levelComplete) return;
+
+    const timeElapsedSeconds = Math.floor(gameTime / 1000);
+    const result = completeLevel(levelId, score, timeElapsedSeconds, tilesCleared);
+
+    setLevelComplete(true);
+    setLevelCompleteData({
+      ...result,
+      score,
+      time: timeElapsedSeconds,
+      tilesCleared,
+      maxCombo,
+    });
+
+    soundManager.playStreakMilestone();
+  }, [levelComplete, gameTime, levelId, score, tilesCleared, maxCombo]);
+
+  // ============================================
+  // LEVEL TIMER (for time-limited levels)
+  // ============================================
+
+  useEffect(() => {
+    if (!isLevelMode || !level?.maxTime || isPaused || isGameOver || levelComplete) return;
+
+    const timer = setInterval(() => {
+      setLevelTimeRemaining(prev => {
+        if (prev === null) return null;
+        const newTime = prev - 0.1;
+        if (newTime <= 0) {
+          // Time's up - check if goal is complete
+          const timeElapsedSeconds = Math.floor(gameTime / 1000);
+          const gameState = {
+            score,
+            tilesCleared,
+            maxCombo,
+            maxChain,
+            entropy: entropyLevel,
+            timeElapsed: timeElapsedSeconds,
+          };
+
+          if (isGoalComplete(level, gameState)) {
+            // Level complete!
+            handleLevelComplete();
+          } else {
+            // Failed - ran out of time
+            setIsGameOver(true);
+            soundManager.playGameOver();
+          }
+          return 0;
+        }
+        return newTime;
+      });
+    }, 100);
+
+    return () => clearInterval(timer);
+  }, [isLevelMode, level, isPaused, isGameOver, levelComplete, gameTime, score, tilesCleared, maxCombo, maxChain, entropyLevel, handleLevelComplete]);
+
+  // Check goal completion on state changes
+  useEffect(() => {
+    if (!isLevelMode || isGameOver || levelComplete || isPaused) return;
+
+    const timeElapsedSeconds = Math.floor(gameTime / 1000);
+    const gameState = {
+      score,
+      tilesCleared,
+      maxCombo,
+      maxChain,
+      entropy: entropyLevel,
+      timeElapsed: timeElapsedSeconds,
+    };
+
+    if (isGoalComplete(level, gameState)) {
+      handleLevelComplete();
+    }
+  }, [isLevelMode, level, score, tilesCleared, maxCombo, maxChain, entropyLevel, gameTime, isGameOver, levelComplete, isPaused, handleLevelComplete]);
 
   // ============================================
   // ENTROPY SPAWNING
@@ -436,7 +563,8 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
     if (tiles.length >= GRID_SIZE * GRID_SIZE - 2) return;
 
     const currentGameTime = Date.now() - gameStartTime;
-    const spawnDelay = calculateSpawnDelay(currentGameTime);
+    // Use level-specific spawn delay or calculate from game time
+    const spawnDelay = level?.spawnDelay || calculateSpawnDelay(currentGameTime);
 
     spawnTimerRef.current = setTimeout(() => {
       setTiles(prevTiles => {
@@ -492,7 +620,7 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
         spawnTimerRef.current = null;
       }
     };
-  }, [tiles.length, isPaused, isGameOver, gameStartTime, gamePhase]);
+  }, [tiles.length, isPaused, isGameOver, gameStartTime, gamePhase, level?.spawnDelay]);
 
   // ============================================
   // CASCADE PROCESSING
@@ -591,6 +719,8 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
 
           if (newMatches.length > 0) {
             cascadeLevelRef.current = currentCascadeLevel + 1;
+            // Track max chain for level goals
+            setMaxChain(prev => Math.max(prev, currentCascadeLevel + 1));
             setTimeout(() => {
               processCascadeStep(newMatches, currentCascadeLevel + 1);
             }, GAME_CONFIG.CASCADE_DELAY_MS);
@@ -757,6 +887,50 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
         }}
         transition={{ duration: 0.4 }}
       >
+        {/* Level Mode Header */}
+        {isLevelMode && level && (
+          <div className="mb-2 bg-void-surface/60 border rounded-lg p-2"
+            style={{ borderColor: world?.color || '#00f0ff', boxShadow: `0 0 15px ${world?.color || '#00f0ff'}30` }}>
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <span className="text-lg font-impact" style={{ color: world?.color }}>
+                  LEVEL {levelId}
+                </span>
+                <span className="text-sm font-rajdhani text-text-muted">
+                  {level.name}
+                </span>
+              </div>
+              <div className="text-sm font-rajdhani text-white">
+                {getGoalDescription(level)}
+              </div>
+              {levelTimeRemaining !== null && (
+                <div className={`text-lg font-bold font-rajdhani ${levelTimeRemaining <= 10 ? 'text-chaos' : 'text-white'}`}
+                  style={{ textShadow: levelTimeRemaining <= 10 ? '0 0 10px #ff3366' : undefined }}>
+                  {Math.ceil(levelTimeRemaining)}s
+                </div>
+              )}
+            </div>
+            {/* Goal Progress Bar */}
+            <div className="mt-2 h-2 bg-void-deep rounded-full overflow-hidden">
+              <motion.div
+                className="h-full rounded-full"
+                style={{ background: `linear-gradient(90deg, ${world?.color || '#00f0ff'}, ${world?.color || '#00f0ff'}cc)` }}
+                animate={{
+                  width: `${calculateGoalProgress(level, {
+                    score,
+                    tilesCleared,
+                    maxCombo,
+                    maxChain,
+                    entropy: entropyLevel,
+                    timeElapsed: Math.floor(gameTime / 1000),
+                  })}%`
+                }}
+                transition={{ duration: 0.3 }}
+              />
+            </div>
+          </div>
+        )}
+
         {/* Compact Header Stats */}
         <div className="flex flex-wrap justify-between items-center mb-2 md:mb-4 gap-2">
           {/* Score */}
@@ -1000,6 +1174,23 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Level Complete Modal */}
+        {levelComplete && levelCompleteData && (
+          <LevelComplete
+            levelId={levelId}
+            score={levelCompleteData.score}
+            time={levelCompleteData.time}
+            tilesCleared={levelCompleteData.tilesCleared}
+            maxCombo={levelCompleteData.maxCombo}
+            earnedStars={levelCompleteData.earnedStars}
+            isNewRecord={levelCompleteData.isNewRecord}
+            unlockedLevel={levelCompleteData.unlockedLevel}
+            onNextLevel={(nextId) => onNextLevel && onNextLevel(nextId)}
+            onRetry={restartGame}
+            onLevelSelect={() => onLevelSelect && onLevelSelect()}
+          />
+        )}
 
         {/* Game Board - RESPONSIVE */}
         <div ref={containerRef} className="flex-1 flex items-center justify-center min-h-0">
