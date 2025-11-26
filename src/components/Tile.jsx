@@ -131,14 +131,14 @@ export default function Tile({
   const config = TILE_CONFIG[tile.type] || TILE_CONFIG.cyan;
   const iconSize = Math.max(24, cellSize * 0.5);
 
-  // Spawn animation: fall from above if new tile
+  // Spawn animation: scale and fade for new tiles (no y offset to avoid overlap)
   const spawnAnimation = isNew
     ? {
-        initial: { y: -(cellSize * 2), scale: 0.8, opacity: 0 },
-        animate: { y: 0, scale: 1, opacity: 1 },
+        initial: { scale: 0, opacity: 0 },
+        animate: { scale: 1, opacity: 1 },
         transition: {
           type: 'spring',
-          stiffness: 300,
+          stiffness: 400,
           damping: 20,
           delay: spawnDelay,
         },
@@ -246,15 +246,13 @@ export default function Tile({
   return (
     <motion.div
       ref={tileRef}
-      className="absolute inset-0 cursor-pointer select-none overflow-visible"
+      className="absolute inset-0 cursor-pointer select-none"
       style={{ perspective: '200px' }}
       initial={spawnAnimation.initial}
       animate={spawnAnimation.animate}
       exit={{
-        scale: [1, 1.3, 0],
-        opacity: [1, 1, 0],
-        rotate: [0, Math.random() > 0.5 ? 15 : -15, 0],
-        filter: ['brightness(1)', 'brightness(2)', 'brightness(0)'],
+        scale: [1, 1.2, 0],
+        opacity: [1, 0.8, 0],
       }}
       transition={spawnAnimation.transition}
       whileHover={{ scale: 1.05 }}

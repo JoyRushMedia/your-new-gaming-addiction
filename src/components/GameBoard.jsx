@@ -1015,7 +1015,7 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
           >
             {/* Grid */}
             <div
-              className="grid relative"
+              className="grid relative overflow-hidden"
               style={{
                 gridTemplateColumns: `repeat(${GRID_SIZE}, ${cellSize}px)`,
                 gridTemplateRows: `repeat(${GRID_SIZE}, ${cellSize}px)`,
@@ -1030,7 +1030,7 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
                 return (
                   <div
                     key={`cell-${x}-${y}`}
-                    className="relative bg-void-surface/30 rounded-lg"
+                    className="relative bg-void-surface/30 rounded-lg overflow-hidden"
                     style={{ width: cellSize, height: cellSize }}
                     data-tile-id={tile?.id}
                   >
