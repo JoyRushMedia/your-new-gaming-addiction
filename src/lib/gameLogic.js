@@ -394,7 +394,6 @@ export function findAllMatches(tiles, gridSize) {
 
   // Check horizontal matches
   for (let y = 0; y < gridSize; y++) {
-    let runStart = 0;
     let runType = null;
     let runTiles = [];
 
@@ -412,7 +411,6 @@ export function findAllMatches(tiles, gridSize) {
         // Start new run
         runType = tileType;
         runTiles = tile ? [tile] : [];
-        runStart = x;
       }
     }
   }
