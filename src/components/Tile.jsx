@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 
 /**
- * Tile Component - COLLAPSE STYLE
- * Features: Spring-animated positions, tap to clear connected groups
+ * Tile Component - SWAP & MATCH-3 STYLE
+ * Features: Spring-animated positions, swipe to swap, responsive interactions
  */
 
 // Enhanced tile configurations with icons and gradients
@@ -114,15 +114,26 @@ const POSITION_SPRING = {
   mass: 0.8,
 };
 
+const SCALE_SPRING = {
+  type: 'spring',
+  stiffness: 500,
+  damping: 25,
+};
+
 export default function Tile({
   tile,
   onClear,
+  onSwap,
   isClearable,
   cellSize = 60,
   gridGap = 4,
   isNew = false,
+  isSwapping = false,
+  isHinted = false,
 }) {
   const [isHovered, setIsHovered] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useRef({ x: 0, y: 0 });
 
   const config = TILE_CONFIG[tile.type] || TILE_CONFIG.cyan;
   const iconSize = Math.max(24, cellSize * 0.5);
@@ -131,11 +142,94 @@ export default function Tile({
   const pixelX = tile.x * (cellSize + gridGap);
   const pixelY = tile.y * (cellSize + gridGap);
 
-  // Handle click/tap - clear if clearable
+  // Handle click/tap - clear if clearable (for auto-matched tiles)
   const handleClick = () => {
+    if (isDragging) return;
     if (isClearable) {
       onClear(tile.id);
     }
+  };
+
+  // Get swipe direction from delta
+  const getSwipeDirection = (deltaX, deltaY) => {
+    const threshold = cellSize * 0.25;
+    const absX = Math.abs(deltaX);
+    const absY = Math.abs(deltaY);
+
+    if (absX < threshold && absY < threshold) return null;
+
+    if (absX > absY) {
+      return deltaX > 0 ? 'right' : 'left';
+    } else {
+      return deltaY > 0 ? 'down' : 'up';
+    }
+  };
+
+  // Mouse/Trackpad drag handlers
+  const handleMouseDown = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+    dragStartRef.current = { x: e.clientX, y: e.clientY };
+
+    const handleMouseMove = (moveEvent) => {
+      const deltaX = moveEvent.clientX - dragStartRef.current.x;
+      const deltaY = moveEvent.clientY - dragStartRef.current.y;
+
+      if (Math.abs(deltaX) > 8 || Math.abs(deltaY) > 8) {
+        setIsDragging(true);
+      }
+    };
+
+    const handleMouseUp = (upEvent) => {
+      const deltaX = upEvent.clientX - dragStartRef.current.x;
+      const deltaY = upEvent.clientY - dragStartRef.current.y;
+      const direction = getSwipeDirection(deltaX, deltaY);
+
+      if (direction && onSwap) {
+        onSwap(tile, direction);
+      }
+
+      setTimeout(() => setIsDragging(false), 30);
+
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
+
+  // Touch drag handlers
+  const handleTouchStart = (e) => {
+    const touch = e.touches[0];
+    setIsDragging(false);
+    dragStartRef.current = { x: touch.clientX, y: touch.clientY };
+  };
+
+  const handleTouchMove = (e) => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const deltaX = touch.clientX - dragStartRef.current.x;
+    const deltaY = touch.clientY - dragStartRef.current.y;
+
+    if (Math.abs(deltaX) > 8 || Math.abs(deltaY) > 8) {
+      setIsDragging(true);
+    }
+  };
+
+  const handleTouchEnd = (e) => {
+    const touch = e.changedTouches[0];
+    const deltaX = touch.clientX - dragStartRef.current.x;
+    const deltaY = touch.clientY - dragStartRef.current.y;
+    const direction = getSwipeDirection(deltaX, deltaY);
+
+    if (direction && onSwap) {
+      onSwap(tile, direction);
+    } else if (!isDragging && isClearable) {
+      onClear(tile.id);
+    }
+
+    setTimeout(() => setIsDragging(false), 30);
   };
 
   return (
@@ -145,8 +239,8 @@ export default function Tile({
       style={{
         width: cellSize,
         height: cellSize,
+        zIndex: isSwapping ? 10 : 1,
       }}
-      // Animate position changes smoothly
       initial={isNew ? { x: pixelX, y: pixelY, scale: 0, opacity: 0 } : { x: pixelX, y: pixelY }}
       animate={{
         x: pixelX,
@@ -165,6 +259,10 @@ export default function Tile({
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onClick={handleClick}
+      onMouseDown={handleMouseDown}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
     >
       {/* Main tile body */}
       <motion.div
@@ -176,6 +274,10 @@ export default function Tile({
             ? `0 0 ${isHovered ? '25px' : '15px'} ${config.glowColor}, ${config.shadowInner}, 0 4px 8px rgba(0,0,0,0.4)`
             : `0 0 8px ${config.glowColor}40, ${config.shadowInner}, 0 2px 4px rgba(0,0,0,0.3)`,
         }}
+        animate={{
+          scale: isSwapping ? 1.05 : 1,
+        }}
+        transition={SCALE_SPRING}
       >
         {/* Top shine effect */}
         <div
@@ -240,7 +342,7 @@ export default function Tile({
         />
 
         {/* Clearable indicator ring */}
-        {isClearable && (
+        {isClearable && !isHinted && (
           <motion.div
             className="absolute inset-[-2px] pointer-events-none rounded-xl"
             style={{
@@ -252,6 +354,26 @@ export default function Tile({
             }}
             transition={{
               duration: 0.8,
+              repeat: Infinity,
+              ease: 'easeInOut',
+            }}
+          />
+        )}
+
+        {/* Hint indicator - pulsing gold ring */}
+        {isHinted && (
+          <motion.div
+            className="absolute inset-[-4px] pointer-events-none rounded-xl"
+            style={{
+              border: '3px solid #ffd700',
+              boxShadow: '0 0 20px #ffd700, inset 0 0 10px #ffd70050',
+            }}
+            animate={{
+              scale: [1, 1.08, 1],
+              opacity: [0.8, 1, 0.8],
+            }}
+            transition={{
+              duration: 0.5,
               repeat: Infinity,
               ease: 'easeInOut',
             }}
