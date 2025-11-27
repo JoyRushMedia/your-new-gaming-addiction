@@ -846,39 +846,32 @@ export function applyGravity(tiles, gridSize, getNextTileId = null) {
         for (let i = 0; i < emptySlots; i++) {
           const newY = i; // Fill from top (y=0, 1, 2, etc.)
 
-          // CRITICAL: Spawn tiles that absolutely DON'T create matches
-          // Check ALL tiles including previously spawned ones in this batch
+          // Simple match avoidance - just check immediate neighbors
+          // Much faster than full board scan
           let type;
-          let attempts = 0;
-          const maxAttempts = 50; // Increase attempts significantly
+          const allCurrentTiles = [...newTiles, ...spawnedTiles];
+          const grid = createGridMap(allCurrentTiles);
 
-          do {
-            type = TILE_TYPES[Math.floor(Math.random() * TILE_TYPES.length)];
+          // Get neighbor colors to avoid
+          const leftTile = grid[`${x - 1},${newY}`];
+          const left2Tile = grid[`${x - 2},${newY}`];
+          const upTile = grid[`${x},${newY - 1}`];
+          const up2Tile = grid[`${x},${newY - 2}`];
 
-            // Build complete test state including ALL spawned tiles so far
-            const allCurrentTiles = [...newTiles, ...spawnedTiles];
-            const testTile = { id: -999, x, y: newY, type };
-            const testTiles = [...allCurrentTiles, testTile];
-
-            // Check if this tile would create ANY match (horizontal or vertical)
-            const matches = findMatchingGroup(testTiles, -999, gridSize);
-
-            // Also do a full board scan to catch edge cases
-            if (matches.length === 0) {
-              const fullMatches = findAllMatches(testTiles, gridSize);
-              if (fullMatches.length === 0) {
-                break; // Safe to use this type
-              }
-            }
-
-            attempts++;
-          } while (attempts < maxAttempts);
-
-          // If we couldn't find a non-matching type after many attempts,
-          // use the type but mark it (this shouldn't happen often)
-          if (attempts >= maxAttempts) {
-            console.warn(`[Gravity] Could not find non-matching tile for (${x},${newY}) after ${maxAttempts} attempts`);
+          // Find types that would create a match
+          const avoidTypes = new Set();
+          if (leftTile && left2Tile && leftTile.type === left2Tile.type) {
+            avoidTypes.add(leftTile.type);
           }
+          if (upTile && up2Tile && upTile.type === up2Tile.type) {
+            avoidTypes.add(upTile.type);
+          }
+
+          // Pick a type that doesn't create a match
+          const safeTypes = TILE_TYPES.filter(t => !avoidTypes.has(t));
+          type = safeTypes.length > 0
+            ? safeTypes[Math.floor(Math.random() * safeTypes.length)]
+            : TILE_TYPES[Math.floor(Math.random() * TILE_TYPES.length)];
 
           // Check if this should be a special tile (rare spawn)
           const specialType = maybeGetSpecialType();
@@ -889,7 +882,7 @@ export function applyGravity(tiles, gridSize, getNextTileId = null) {
             y: newY,
             type,
             isNew: true,
-            special: specialType || undefined, // Add special property if applicable
+            special: specialType || undefined,
           };
           spawnedTiles.push(newTile);
 

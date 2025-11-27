@@ -726,73 +726,50 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
       soundManager.playClear(1 + (tilesToClearInput.length - 3) * 0.2);
     }
 
-    // Use a single timeout chain instead of nested callbacks
+    // Simplified cascade - single setTiles, use refs for cascade continuation
     setTimeout(() => {
-      // Step 1: Remove cleared tiles and apply gravity
-      // Also handle special tile effects here where we have access to prevTiles
       setTiles(prevTiles => {
         // Expand clear to include special tile effects
         let tilesToClear = [...tilesToClearInput];
+        let hasSpecial = false;
 
-        const specialTilesInMatch = prevTiles.filter(
-          t => tilesToClearInput.includes(t.id) && isSpecialTile(t)
-        );
-
-        // Activate each special tile's effect
-        specialTilesInMatch.forEach(specialTile => {
-          const extraTargets = getSpecialTileClearTargets(specialTile, prevTiles, GRID_SIZE);
-          extraTargets.forEach(id => {
-            if (!tilesToClear.includes(id)) {
-              tilesToClear.push(id);
-            }
-          });
-          soundManager.playBigClear();
+        prevTiles.forEach(t => {
+          if (tilesToClearInput.includes(t.id) && isSpecialTile(t)) {
+            hasSpecial = true;
+            const extraTargets = getSpecialTileClearTargets(t, prevTiles, GRID_SIZE);
+            extraTargets.forEach(id => {
+              if (!tilesToClear.includes(id)) tilesToClear.push(id);
+            });
+          }
         });
+
+        if (hasSpecial) soundManager.playBigClear();
 
         const remainingTiles = prevTiles.filter(t => !tilesToClear.includes(t.id));
         const { newTiles, spawnedTiles } = applyGravity(remainingTiles, GRID_SIZE, getNextTileId);
 
-        // Mark spawned tiles for animation
-        if (spawnedTiles && spawnedTiles.length > 0) {
-          const spawnedIds = spawnedTiles.map(t => t.id);
-          setNewTileIds(prev => new Set([...prev, ...spawnedIds]));
-          setTimeout(() => {
-            setNewTileIds(prev => {
-              const updated = new Set(prev);
-              spawnedIds.forEach(id => updated.delete(id));
-              return updated;
-            });
-          }, 300);
+        // Mark spawned tiles for animation (simplified)
+        if (spawnedTiles?.length > 0) {
+          const ids = spawnedTiles.map(t => t.id);
+          setNewTileIds(new Set(ids));
+          setTimeout(() => setNewTileIds(new Set()), 250);
         }
 
-        // Schedule cascade check AFTER gravity animation
-        // Store newTiles in ref to avoid stale closure
+        setGamePhase(GAME_PHASE.FALLING);
+
+        // Schedule cascade check after gravity settles
         setTimeout(() => {
-          setGamePhase(GAME_PHASE.CASCADE_CHECK);
-
-          // Re-read tiles from state to avoid stale closure issues
-          setTiles(currentTiles => {
-            const matches = findAllMatches(currentTiles, GRID_SIZE);
-
-            if (matches.length > 0 && currentCascadeLevel < MAX_CASCADE_LEVEL - 1) {
-              cascadeLevelRef.current = currentCascadeLevel + 1;
-              setMaxChain(prev => Math.max(prev, currentCascadeLevel + 1));
-
-              // Schedule next cascade step
-              setTimeout(() => {
-                processCascadeStep(matches, currentCascadeLevel + 1);
-              }, GAME_CONFIG.CASCADE_DELAY_MS);
-            } else {
-              // End of cascade chain
-              setGamePhase(GAME_PHASE.IDLE);
-              cascadeLevelRef.current = 0;
-            }
-
-            return currentTiles; // No change, just reading
-          });
+          const matches = findAllMatches(newTiles, GRID_SIZE);
+          if (matches.length > 0 && currentCascadeLevel < MAX_CASCADE_LEVEL - 1) {
+            cascadeLevelRef.current = currentCascadeLevel + 1;
+            setMaxChain(prev => Math.max(prev, currentCascadeLevel + 1));
+            processCascadeStep(matches, currentCascadeLevel + 1);
+          } else {
+            setGamePhase(GAME_PHASE.IDLE);
+            cascadeLevelRef.current = 0;
+          }
         }, GAME_CONFIG.FALL_ANIMATION_MS);
 
-        setGamePhase(GAME_PHASE.FALLING);
         return newTiles;
       });
     }, GAME_CONFIG.CLEAR_ANIMATION_MS);

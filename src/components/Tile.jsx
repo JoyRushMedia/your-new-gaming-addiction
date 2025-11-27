@@ -363,38 +363,19 @@ export default function Tile({
           }}
         />
 
-        {/* Animated pulse for clearable tiles */}
+        {/* Simple glow for clearable tiles - no animation */}
         {isClearable && (
-          <motion.div
+          <div
             className="absolute inset-0 pointer-events-none rounded-lg"
             style={{
-              background: `radial-gradient(circle at 50% 50%, ${config.glowColor}30 0%, transparent 60%)`,
-            }}
-            animate={{
-              scale: [1, 1.15, 1],
-              opacity: [0.3, 0.5, 0.3],
-            }}
-            transition={{
-              duration: 1,
-              repeat: Infinity,
-              ease: 'easeInOut',
+              background: `radial-gradient(circle at 50% 50%, ${config.glowColor}40 0%, transparent 60%)`,
             }}
           />
         )}
 
-        {/* Icon container */}
+        {/* Icon container - simplified animations for performance */}
         <div className="absolute inset-0 flex items-center justify-center">
-          <motion.div
-            animate={{
-              scale: isHovered ? 1.1 : 1,
-              rotate: isSpecial ? [0, 5, -5, 0] : 0,
-            }}
-            transition={{
-              duration: isSpecial ? 2 : 0.15,
-              repeat: isSpecial ? Infinity : 0,
-              ease: 'easeInOut',
-            }}
-          >
+          <div style={{ transform: isHovered ? 'scale(1.1)' : 'scale(1)', transition: 'transform 0.1s' }}>
             {isSpecial ? (
               <SpecialIcon special={tile.special} size={iconSize} />
             ) : (
@@ -404,25 +385,16 @@ export default function Tile({
                 size={iconSize}
               />
             )}
-          </motion.div>
+          </div>
         </div>
 
-        {/* Special tile glow effect */}
+        {/* Special tile indicator - static glow, no animation */}
         {isSpecial && (
-          <motion.div
-            className="absolute inset-[-4px] pointer-events-none rounded-xl"
+          <div
+            className="absolute inset-[-3px] pointer-events-none rounded-xl"
             style={{
-              border: `3px solid ${config.glowColor}`,
-              boxShadow: `0 0 20px ${config.glowColor}, 0 0 40px ${config.glowColor}50`,
-            }}
-            animate={{
-              opacity: [0.6, 1, 0.6],
-              scale: [1, 1.02, 1],
-            }}
-            transition={{
-              duration: 1.5,
-              repeat: Infinity,
-              ease: 'easeInOut',
+              border: `2px solid ${config.glowColor}`,
+              boxShadow: `0 0 15px ${config.glowColor}`,
             }}
           />
         )}
@@ -445,41 +417,24 @@ export default function Tile({
           }}
         />
 
-        {/* Clearable indicator ring */}
+        {/* Clearable indicator ring - static */}
         {isClearable && !isHinted && (
-          <motion.div
+          <div
             className="absolute inset-[-2px] pointer-events-none rounded-xl"
             style={{
               border: `2px solid ${config.glowColor}`,
-            }}
-            animate={{
-              opacity: [0.4, 0.7, 0.4],
-              scale: [1, 1.02, 1],
-            }}
-            transition={{
-              duration: 0.8,
-              repeat: Infinity,
-              ease: 'easeInOut',
+              opacity: 0.6,
             }}
           />
         )}
 
-        {/* Hint indicator - pulsing gold ring */}
+        {/* Hint indicator - simple gold ring */}
         {isHinted && (
-          <motion.div
-            className="absolute inset-[-4px] pointer-events-none rounded-xl"
+          <div
+            className="absolute inset-[-3px] pointer-events-none rounded-xl"
             style={{
               border: '3px solid #ffd700',
-              boxShadow: '0 0 20px #ffd700, inset 0 0 10px #ffd70050',
-            }}
-            animate={{
-              scale: [1, 1.08, 1],
-              opacity: [0.8, 1, 0.8],
-            }}
-            transition={{
-              duration: 0.5,
-              repeat: Infinity,
-              ease: 'easeInOut',
+              boxShadow: '0 0 15px #ffd700',
             }}
           />
         )}
