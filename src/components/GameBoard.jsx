@@ -725,50 +725,58 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
       soundManager.playClear(1 + (tilesToClear.length - 3) * 0.2);
     }
 
+    // Use a single timeout chain instead of nested callbacks
     setTimeout(() => {
+      // Step 1: Remove cleared tiles and apply gravity
       setTiles(prevTiles => {
         const remainingTiles = prevTiles.filter(t => !tilesToClear.includes(t.id));
-        setGamePhase(GAME_PHASE.FALLING);
-
-        // Apply gravity AND spawn new tiles from top (Candy Crush style)
         const { newTiles, spawnedTiles } = applyGravity(remainingTiles, GRID_SIZE, getNextTileId);
 
-        // Mark spawned tiles as new for fall-in animation (skip sound during cascade for performance)
+        // Mark spawned tiles for animation
         if (spawnedTiles && spawnedTiles.length > 0) {
           const spawnedIds = spawnedTiles.map(t => t.id);
           setNewTileIds(prev => new Set([...prev, ...spawnedIds]));
-          // Clear new flag after animation
           setTimeout(() => {
             setNewTileIds(prev => {
               const updated = new Set(prev);
               spawnedIds.forEach(id => updated.delete(id));
               return updated;
             });
-          }, 400);
+          }, 300);
         }
 
+        // Schedule cascade check AFTER gravity animation
+        // Store newTiles in ref to avoid stale closure
         setTimeout(() => {
-          setTiles(newTiles);
           setGamePhase(GAME_PHASE.CASCADE_CHECK);
-          const newMatches = findAllMatches(newTiles, GRID_SIZE);
 
-          if (newMatches.length > 0) {
-            cascadeLevelRef.current = currentCascadeLevel + 1;
-            // Track max chain for level goals
-            setMaxChain(prev => Math.max(prev, currentCascadeLevel + 1));
-            setTimeout(() => {
-              processCascadeStep(newMatches, currentCascadeLevel + 1);
-            }, GAME_CONFIG.CASCADE_DELAY_MS);
-          } else {
-            setGamePhase(GAME_PHASE.IDLE);
-            cascadeLevelRef.current = 0;
-          }
+          // Re-read tiles from state to avoid stale closure issues
+          setTiles(currentTiles => {
+            const matches = findAllMatches(currentTiles, GRID_SIZE);
+
+            if (matches.length > 0 && currentCascadeLevel < MAX_CASCADE_LEVEL - 1) {
+              cascadeLevelRef.current = currentCascadeLevel + 1;
+              setMaxChain(prev => Math.max(prev, currentCascadeLevel + 1));
+
+              // Schedule next cascade step
+              setTimeout(() => {
+                processCascadeStep(matches, currentCascadeLevel + 1);
+              }, GAME_CONFIG.CASCADE_DELAY_MS);
+            } else {
+              // End of cascade chain
+              setGamePhase(GAME_PHASE.IDLE);
+              cascadeLevelRef.current = 0;
+            }
+
+            return currentTiles; // No change, just reading
+          });
         }, GAME_CONFIG.FALL_ANIMATION_MS);
 
+        setGamePhase(GAME_PHASE.FALLING);
         return newTiles;
       });
     }, GAME_CONFIG.CLEAR_ANIMATION_MS);
-  }, [combo, tiles, createScorePopup, getNextTileId]);
+  }, [combo, createScorePopup, getNextTileId]); // Removed 'tiles' - we use prevTiles/currentTiles
 
   // ============================================
   // SWAP HANDLER

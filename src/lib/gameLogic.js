@@ -734,37 +734,53 @@ export function applyGravity(tiles, gridSize, getNextTileId = null) {
         for (let i = 0; i < emptySlots; i++) {
           const newY = i; // Fill from top (y=0, 1, 2, etc.)
 
-          // Spawn tiles that DON'T create immediate matches to prevent infinite cascades
-          // Try up to 10 times to find a non-matching type
+          // CRITICAL: Spawn tiles that absolutely DON'T create matches
+          // Check ALL tiles including previously spawned ones in this batch
           let type;
           let attempts = 0;
-          const allCurrentTiles = [...newTiles, ...spawnedTiles];
+          const maxAttempts = 50; // Increase attempts significantly
 
           do {
-            // Use random type, not smart type, to avoid creating cascades
             type = TILE_TYPES[Math.floor(Math.random() * TILE_TYPES.length)];
-            const testTile = { id: -1, x, y: newY, type };
-            const testTiles = [...allCurrentTiles, testTile];
-            const matches = findMatchingGroup(testTiles, -1, gridSize);
 
-            // If no match or too many attempts, use this type
-            if (matches.length === 0 || attempts > 10) break;
+            // Build complete test state including ALL spawned tiles so far
+            const allCurrentTiles = [...newTiles, ...spawnedTiles];
+            const testTile = { id: -999, x, y: newY, type };
+            const testTiles = [...allCurrentTiles, testTile];
+
+            // Check if this tile would create ANY match (horizontal or vertical)
+            const matches = findMatchingGroup(testTiles, -999, gridSize);
+
+            // Also do a full board scan to catch edge cases
+            if (matches.length === 0) {
+              const fullMatches = findAllMatches(testTiles, gridSize);
+              if (fullMatches.length === 0) {
+                break; // Safe to use this type
+              }
+            }
+
             attempts++;
-          } while (attempts <= 10);
+          } while (attempts < maxAttempts);
+
+          // If we couldn't find a non-matching type after many attempts,
+          // use the type but mark it (this shouldn't happen often)
+          if (attempts >= maxAttempts) {
+            console.warn(`[Gravity] Could not find non-matching tile for (${x},${newY}) after ${maxAttempts} attempts`);
+          }
 
           const newTile = {
             id: getNextTileId(),
             x: x,
             y: newY,
             type,
-            isNew: true, // Mark as new for animation
+            isNew: true,
           };
           spawnedTiles.push(newTile);
 
-          // Record fall animation for spawned tile (falling from above screen)
+          // Record fall animation for spawned tile
           fallAnimations.push({
             tileId: newTile.id,
-            fromY: -1 - (emptySlots - 1 - i), // Start above screen
+            fromY: -1 - (emptySlots - 1 - i),
             toY: newY,
             distance: emptySlots - i,
             isSpawned: true,
