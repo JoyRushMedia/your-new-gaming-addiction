@@ -669,8 +669,10 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
     }
   }, []);
 
+  const MAX_CASCADE_LEVEL = 10; // Safety limit to prevent infinite cascades
+
   const processCascadeStep = useCallback((tilesToClear, currentCascadeLevel) => {
-    if (tilesToClear.length === 0) {
+    if (tilesToClear.length === 0 || currentCascadeLevel >= MAX_CASCADE_LEVEL) {
       setGamePhase(GAME_PHASE.IDLE);
       cascadeLevelRef.current = 0;
       return;
@@ -731,22 +733,18 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
         // Apply gravity AND spawn new tiles from top (Candy Crush style)
         const { newTiles, spawnedTiles } = applyGravity(remainingTiles, GRID_SIZE, getNextTileId);
 
-        // Mark spawned tiles as new for fall-in animation
+        // Mark spawned tiles as new for fall-in animation (skip sound during cascade for performance)
         if (spawnedTiles && spawnedTiles.length > 0) {
-          soundManager.playSpawn();
-          setNewTileIds(prev => {
-            const updated = new Set(prev);
-            spawnedTiles.forEach(t => updated.add(t.id));
-            return updated;
-          });
+          const spawnedIds = spawnedTiles.map(t => t.id);
+          setNewTileIds(prev => new Set([...prev, ...spawnedIds]));
           // Clear new flag after animation
           setTimeout(() => {
             setNewTileIds(prev => {
               const updated = new Set(prev);
-              spawnedTiles.forEach(t => updated.delete(t.id));
+              spawnedIds.forEach(id => updated.delete(id));
               return updated;
             });
-          }, 600);
+          }, 400);
         }
 
         setTimeout(() => {

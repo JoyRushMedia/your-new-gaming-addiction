@@ -733,7 +733,25 @@ export function applyGravity(tiles, gridSize, getNextTileId = null) {
 
         for (let i = 0; i < emptySlots; i++) {
           const newY = i; // Fill from top (y=0, 1, 2, etc.)
-          const type = generateSmartTileType(x, newY, [...newTiles, ...spawnedTiles], gridSize);
+
+          // Spawn tiles that DON'T create immediate matches to prevent infinite cascades
+          // Try up to 10 times to find a non-matching type
+          let type;
+          let attempts = 0;
+          const allCurrentTiles = [...newTiles, ...spawnedTiles];
+
+          do {
+            // Use random type, not smart type, to avoid creating cascades
+            type = TILE_TYPES[Math.floor(Math.random() * TILE_TYPES.length)];
+            const testTile = { id: -1, x, y: newY, type };
+            const testTiles = [...allCurrentTiles, testTile];
+            const matches = findMatchingGroup(testTiles, -1, gridSize);
+
+            // If no match or too many attempts, use this type
+            if (matches.length === 0 || attempts > 10) break;
+            attempts++;
+          } while (attempts <= 10);
+
           const newTile = {
             id: getNextTileId(),
             x: x,
