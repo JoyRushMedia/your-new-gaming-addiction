@@ -111,6 +111,23 @@ export default function GameBoard({
   });
   const [showShareCopied, setShowShareCopied] = useState(false);
 
+  // Timed Challenge Mode
+  const [gameMode, setGameMode] = useState('endless'); // 'endless' | 'timed'
+  const [timedModeSeconds, setTimedModeSeconds] = useState(GAME_CONFIG.TIMED_MODE_DURATION);
+  const [showModeSelect, setShowModeSelect] = useState(true);
+  const [timedHighScore, setTimedHighScore] = useState(() => {
+    try {
+      const saved = localStorage.getItem('entropyReduction_timedHighScore');
+      return saved ? parseInt(saved, 10) : 0;
+    } catch {
+      return 0;
+    }
+  });
+
+  // Enhanced feedback state
+  const [comboFlash, setComboFlash] = useState(false);
+  const [bigPlayMessage, setBigPlayMessage] = useState(null);
+
   // Cascade & Animation State
   const [gamePhase, setGamePhase] = useState(GAME_PHASE.IDLE);
   const cascadeLevelRef = useRef(0);
@@ -215,11 +232,38 @@ export default function GameBoard({
   // ============================================
 
   useEffect(() => {
-    if (isPaused || isGameOver) return;
+    if (isPaused || isGameOver || showModeSelect) return;
 
     const timer = setInterval(() => {
       const elapsed = Date.now() - gameStartTime;
       setGameTime(elapsed);
+
+      // Timed mode countdown
+      if (gameMode === 'timed') {
+        const remaining = GAME_CONFIG.TIMED_MODE_DURATION - Math.floor(elapsed / 1000);
+        setTimedModeSeconds(Math.max(0, remaining));
+
+        // Time's up!
+        if (remaining <= 0) {
+          setIsGameOver(true);
+          soundManager.playGameOver();
+
+          // Check for new high score in timed mode
+          if (score > timedHighScore) {
+            setTimedHighScore(score);
+            try {
+              localStorage.setItem('entropyReduction_timedHighScore', score.toString());
+            } catch {
+              // Ignore
+            }
+          }
+        }
+
+        // Warning sounds at 10, 5, 3, 2, 1 seconds
+        if ([10, 5, 3, 2, 1].includes(remaining)) {
+          soundManager.playNearMiss();
+        }
+      }
 
       const newDifficulty = getDifficultyLevel(elapsed);
       if (newDifficulty > lastDifficultyLevel.current) {
@@ -230,7 +274,7 @@ export default function GameBoard({
     }, 100);
 
     return () => clearInterval(timer);
-  }, [gameStartTime, isPaused, isGameOver]);
+  }, [gameStartTime, isPaused, isGameOver, gameMode, score, timedHighScore, showModeSelect]);
 
   // ============================================
   // GAME OVER CHECK - Only for level mode time-out or explicit conditions
@@ -331,6 +375,15 @@ export default function GameBoard({
   // RESTART GAME
   // ============================================
 
+  // Start game with specific mode
+  const startGameWithMode = useCallback((mode) => {
+    setGameMode(mode);
+    setShowModeSelect(false);
+    setTimedModeSeconds(GAME_CONFIG.TIMED_MODE_DURATION);
+    setGameStartTime(Date.now());
+    initSound();
+  }, [initSound]);
+
   const restartGame = useCallback(() => {
     tileIdCounter = 0;
 
@@ -390,6 +443,10 @@ export default function GameBoard({
     setGamePhase(GAME_PHASE.IDLE);
     cascadeLevelRef.current = 0;
     lastDifficultyLevel.current = 1;
+    // Reset timed mode
+    setTimedModeSeconds(GAME_CONFIG.TIMED_MODE_DURATION);
+    setComboFlash(false);
+    setBigPlayMessage(null);
     // Reset level-specific state
     setMaxChain(0);
     setLevelComplete(false);
@@ -403,6 +460,13 @@ export default function GameBoard({
     setNewTileIds(new Set(initialTiles.map(t => t.id)));
     setTimeout(() => setNewTileIds(new Set()), 1500);
   }, [level]);
+
+  // Go back to mode selection
+  const goToModeSelect = useCallback(() => {
+    setShowModeSelect(true);
+    setIsGameOver(false);
+    restartGame();
+  }, [restartGame]);
 
   // ============================================
   // SHARE RESULTS
@@ -701,27 +765,43 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
       }
     }
 
-    // Screen flash for big combos or cascades
-    if (combo >= 3 || currentCascadeLevel >= 1 || tilesToClearInput.length >= 5) {
-      const flashColor = combo >= 5 ? '#ffb000' :
+    // Enhanced screen flash based on reward analysis
+    const shouldFlash = combo >= 2 || currentCascadeLevel >= 1 || tilesToClearInput.length >= 4;
+    if (shouldFlash) {
+      const flashColor = reward.isCritical ? '#ffd700' :
+                         combo >= 5 ? '#ff6600' :
+                         combo >= 3 ? '#ffb000' :
                          currentCascadeLevel >= 2 ? '#a855f7' :
                          tilesToClearInput.length >= 5 ? '#00f0ff' : '#ffffff';
       setScreenFlash(flashColor);
-      setTimeout(() => setScreenFlash(null), 150);
+      setTimeout(() => setScreenFlash(null), 120);
+    }
+
+    // Screen shake for powerful plays
+    if (reward.screenShake || reward.isCritical || combo >= 4 || currentCascadeLevel >= 2) {
+      setShake(true);
+      setTimeout(() => setShake(false), 300);
+    }
+
+    // Combo flash effect
+    if (combo >= 3) {
+      setComboFlash(true);
+      setTimeout(() => setComboFlash(false), 200);
     }
 
     if (reward.message) {
       setCriticalMessage(reward.message);
+      setBigPlayMessage(reward.totalMultiplier > 2 ? `x${reward.totalMultiplier}` : null);
+
       if (reward.isCritical) {
-        setShake(true);
         soundManager.playCritical();
-      } else if (currentCascadeLevel > 0) {
+      } else if (currentCascadeLevel > 0 || combo >= 3) {
         soundManager.playBigClear();
       }
       setTimeout(() => {
         setCriticalMessage(null);
-        setShake(false);
-      }, 800);
+        setBigPlayMessage(null);
+      }, 900);
     } else {
       soundManager.playClear(1 + (tilesToClearInput.length - 3) * 0.2);
     }
@@ -926,10 +1006,10 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
       <motion.div
         className="w-full h-full flex flex-col"
         animate={{
-          x: shake ? [0, -4, 4, -4, 4, 0] : 0,
-          y: shake ? [0, 4, -4, 4, -4, 0] : 0,
+          x: shake ? [0, -8, 8, -6, 6, -4, 4, 0] : 0,
+          y: shake ? [0, 6, -6, 4, -4, 2, -2, 0] : 0,
         }}
-        transition={{ duration: 0.4 }}
+        transition={{ duration: 0.35, ease: "easeOut" }}
       >
         {/* Level Mode Header */}
         {isLevelMode && level && (
@@ -975,6 +1055,40 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
           </div>
         )}
 
+        {/* Timed Mode Timer - Prominent Display */}
+        {gameMode === 'timed' && !showModeSelect && (
+          <motion.div
+            className="mb-3 bg-gradient-to-r from-orange-900/80 to-red-900/80 border-2 rounded-xl p-3 text-center"
+            style={{
+              borderColor: timedModeSeconds <= 10 ? '#ff3366' : timedModeSeconds <= 30 ? '#ff6600' : '#ffb000',
+              boxShadow: timedModeSeconds <= 10 ? '0 0 30px #ff336680' : '0 0 20px #ff660040',
+            }}
+            animate={timedModeSeconds <= 10 ? { scale: [1, 1.02, 1] } : {}}
+            transition={{ duration: 0.5, repeat: timedModeSeconds <= 10 ? Infinity : 0 }}
+          >
+            <div className="flex items-center justify-center gap-4">
+              <div className="text-sm font-rajdhani text-orange-300 uppercase tracking-wider">Time Left</div>
+              <motion.div
+                className="text-4xl md:text-5xl font-impact"
+                style={{
+                  color: timedModeSeconds <= 10 ? '#ff3366' : timedModeSeconds <= 30 ? '#ff6600' : '#ffffff',
+                  textShadow: timedModeSeconds <= 10 ? '0 0 20px #ff3366' : '0 0 10px #ff6600',
+                }}
+                key={timedModeSeconds}
+                initial={{ scale: 1.2 }}
+                animate={{ scale: 1 }}
+              >
+                {timedModeSeconds}s
+              </motion.div>
+              {timedHighScore > 0 && (
+                <div className="text-sm font-rajdhani text-yellow-400">
+                  Target: {timedHighScore.toLocaleString()}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+
         {/* Compact Header Stats */}
         <div className="flex flex-wrap justify-between items-center mb-3 gap-2">
           {/* Left Side - Main Stats */}
@@ -994,38 +1108,53 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
               >
                 {score.toLocaleString()}
               </motion.div>
-              {highScore > 0 && score < highScore && (
+              {gameMode === 'endless' && highScore > 0 && score < highScore && (
                 <div className="text-[10px] text-text-muted font-rajdhani">
                   BEST: {highScore.toLocaleString()}
                 </div>
               )}
-              {score > 0 && score >= highScore && (
+              {gameMode === 'endless' && score > 0 && score >= highScore && (
+                <div className="text-[10px] text-neon-amber font-rajdhani animate-pulse">
+                  ★ NEW BEST
+                </div>
+              )}
+              {gameMode === 'timed' && score > 0 && score >= timedHighScore && timedHighScore > 0 && (
                 <div className="text-[10px] text-neon-amber font-rajdhani animate-pulse">
                   ★ NEW BEST
                 </div>
               )}
             </motion.div>
 
-            {/* Combo Box */}
+            {/* Combo Box - Enhanced with flash effect */}
             <motion.div
               className="bg-void-surface/90 border-2 rounded-xl px-4 py-2 min-w-[90px]"
               style={{
-                borderColor: combo > 0 ? '#ffb000' : '#2a2a3a',
-                boxShadow: combo > 0 ? '0 0 25px #ffb00060' : 'none',
+                borderColor: combo >= 5 ? '#ff6600' : combo > 0 ? '#ffb000' : '#2a2a3a',
+                boxShadow: combo >= 5 ? '0 0 35px #ff660080' : combo > 0 ? '0 0 25px #ffb00060' : 'none',
+                background: comboFlash ? 'linear-gradient(135deg, #ff660040, #ffb00040)' : undefined,
               }}
-              animate={{ scale: combo > 2 ? [1, 1.05, 1] : 1 }}
+              animate={{
+                scale: combo >= 4 ? [1, 1.08, 1] : combo > 2 ? [1, 1.05, 1] : 1,
+              }}
               transition={{ duration: 0.3, repeat: combo > 2 ? Infinity : 0 }}
             >
-              <div className="text-xs font-rajdhani tracking-widest uppercase" style={{ color: combo > 0 ? '#ffb000' : '#666' }}>
-                Combo
+              <div className="text-xs font-rajdhani tracking-widest uppercase"
+                style={{ color: combo >= 5 ? '#ff6600' : combo > 0 ? '#ffb000' : '#666' }}>
+                {combo >= 6 ? 'ON FIRE!' : combo >= 4 ? 'HOT!' : 'Combo'}
               </div>
-              <div className="text-2xl md:text-3xl font-impact" style={{ color: combo > 0 ? '#ffffff' : '#444' }}>
+              <div className="text-2xl md:text-3xl font-impact"
+                style={{ color: combo >= 5 ? '#ff6600' : combo > 0 ? '#ffffff' : '#444' }}>
                 {combo > 0 ? `×${combo}` : '—'}
               </div>
               {combo > 0 && (
-                <div className="h-1 bg-void-deep rounded-full overflow-hidden mt-1">
+                <div className="h-1.5 bg-void-deep rounded-full overflow-hidden mt-1">
                   <motion.div
-                    className="h-full bg-gradient-to-r from-neon-amber to-yellow-300"
+                    className="h-full"
+                    style={{
+                      background: combo >= 5
+                        ? 'linear-gradient(90deg, #ff6600, #ff3366)'
+                        : 'linear-gradient(90deg, #ffb000, #ffd700)',
+                    }}
                     animate={{ width: `${comboTimeLeft}%` }}
                     transition={{ duration: 0.1 }}
                   />
@@ -1153,7 +1282,7 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
           <div className="text-sm font-rajdhani text-neon-violet font-bold">{difficultyLevel}</div>
         </div>
 
-        {/* Critical Message Overlay */}
+        {/* Critical Message Overlay - Enhanced with multiplier */}
         <AnimatePresence>
           {criticalMessage && (
             <motion.div
@@ -1162,14 +1291,29 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 1.5 }}
             >
-              <motion.div
-                className="text-impact text-3xl md:text-5xl text-neon-violet text-center px-4"
-                style={{ textShadow: '0 0 40px #a855f7' }}
-                animate={{ scale: [1, 1.1, 1] }}
-                transition={{ duration: 0.3, repeat: 1 }}
-              >
-                {criticalMessage}
-              </motion.div>
+              <div className="text-center">
+                <motion.div
+                  className="text-impact text-4xl md:text-6xl text-center px-4"
+                  style={{
+                    color: combo >= 5 ? '#ff6600' : '#a855f7',
+                    textShadow: combo >= 5 ? '0 0 50px #ff6600, 0 0 100px #ff3366' : '0 0 40px #a855f7',
+                  }}
+                  animate={{ scale: [1, 1.15, 1], rotate: [0, 2, -2, 0] }}
+                  transition={{ duration: 0.4 }}
+                >
+                  {criticalMessage}
+                </motion.div>
+                {bigPlayMessage && (
+                  <motion.div
+                    className="text-impact text-2xl md:text-3xl text-yellow-400 mt-2"
+                    style={{ textShadow: '0 0 30px #ffd700' }}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                  >
+                    {bigPlayMessage} MULTIPLIER
+                  </motion.div>
+                )}
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -1193,9 +1337,87 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
           )}
         </AnimatePresence>
 
+        {/* Mode Selection Overlay */}
+        <AnimatePresence>
+          {showModeSelect && !isLevelMode && (
+            <motion.div
+              className="fixed inset-0 bg-void-black/95 flex items-center justify-center z-50"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <motion.div
+                className="text-center max-w-md w-full p-4"
+                initial={{ scale: 0.8, y: 30 }}
+                animate={{ scale: 1, y: 0 }}
+              >
+                <div className="text-impact text-3xl md:text-4xl text-neon-cyan mb-2"
+                  style={{ textShadow: '0 0 40px #00f0ff' }}>
+                  ENTROPY REDUCTION
+                </div>
+                <div className="text-text-muted mb-6 font-rajdhani">Select your challenge</div>
+
+                <div className="flex flex-col gap-4">
+                  {/* Timed Mode - Featured */}
+                  <motion.button
+                    className="bg-gradient-to-r from-orange-600 to-red-600 border-2 border-orange-400 rounded-xl px-6 py-4 text-left w-full"
+                    style={{ boxShadow: '0 0 30px #ff660080' }}
+                    whileHover={{ scale: 1.02, boxShadow: '0 0 40px #ff6600' }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => startGameWithMode('timed')}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-xl font-impact text-white">60-SECOND BLITZ</div>
+                        <div className="text-sm font-rajdhani text-orange-200">Race against time! Beat your high score.</div>
+                      </div>
+                      <div className="text-3xl">⏱️</div>
+                    </div>
+                    {timedHighScore > 0 && (
+                      <div className="mt-2 text-sm font-rajdhani text-yellow-300">
+                        Best: {timedHighScore.toLocaleString()} pts
+                      </div>
+                    )}
+                  </motion.button>
+
+                  {/* Endless Mode */}
+                  <motion.button
+                    className="bg-void-surface border-2 border-neon-cyan rounded-xl px-6 py-4 text-left w-full"
+                    style={{ boxShadow: '0 0 20px #00f0ff40' }}
+                    whileHover={{ scale: 1.02, boxShadow: '0 0 30px #00f0ff60' }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => startGameWithMode('endless')}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-xl font-impact text-neon-cyan">ENDLESS MODE</div>
+                        <div className="text-sm font-rajdhani text-text-muted">Relax and play at your own pace.</div>
+                      </div>
+                      <div className="text-3xl">♾️</div>
+                    </div>
+                    {highScore > 0 && (
+                      <div className="mt-2 text-sm font-rajdhani text-neon-cyan/70">
+                        Best: {highScore.toLocaleString()} pts
+                      </div>
+                    )}
+                  </motion.button>
+                </div>
+
+                <motion.button
+                  className="mt-6 text-text-muted hover:text-neon-magenta font-rajdhani"
+                  whileHover={{ scale: 1.05 }}
+                  onClick={onHome}
+                >
+                  ← Back to Home
+                </motion.button>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Pause Overlay */}
         <AnimatePresence>
-          {isPaused && !isGameOver && (
+          {isPaused && !isGameOver && !showModeSelect && (
             <motion.div
               className="fixed inset-0 bg-void-black/80 flex items-center justify-center z-50"
               initial={{ opacity: 0 }}
@@ -1233,36 +1455,96 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
                 initial={{ scale: 0.8, y: 30 }}
                 animate={{ scale: 1, y: 0 }}
               >
-                <div className="text-impact text-3xl md:text-4xl text-chaos mb-2" style={{ textShadow: '0 0 40px #ff3366' }}>
-                  ENTROPY OVERFLOW
-                </div>
-                <div className="text-text-muted text-sm mb-4">System collapse...</div>
+                {gameMode === 'timed' ? (
+                  <>
+                    <div className="text-impact text-3xl md:text-4xl text-neon-amber mb-2"
+                      style={{ textShadow: '0 0 40px #ffb000' }}>
+                      TIME'S UP!
+                    </div>
+                    {score > timedHighScore && timedHighScore > 0 ? (
+                      <div className="text-lg text-yellow-400 mb-4 font-rajdhani animate-pulse">
+                        ★ NEW HIGH SCORE! ★
+                      </div>
+                    ) : score === timedHighScore && score > 0 ? (
+                      <div className="text-lg text-yellow-400 mb-4 font-rajdhani">
+                        ★ MATCHED YOUR BEST! ★
+                      </div>
+                    ) : (
+                      <div className="text-text-muted text-sm mb-4">
+                        {timedHighScore > 0 ? `${timedHighScore - score} away from your best` : 'Great run!'}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="text-impact text-3xl md:text-4xl text-chaos mb-2"
+                      style={{ textShadow: '0 0 40px #ff3366' }}>
+                      GAME OVER
+                    </div>
+                    <div className="text-text-muted text-sm mb-4">
+                      {score >= highScore && score > 0 ? '★ NEW HIGH SCORE! ★' : 'Keep practicing!'}
+                    </div>
+                  </>
+                )}
 
-                <div className="bg-void-surface border-2 border-neon-cyan rounded-lg p-4 mb-4" style={{ boxShadow: '0 0 20px #00f0ff' }}>
+                <div className="bg-void-surface border-2 rounded-lg p-4 mb-4"
+                  style={{
+                    borderColor: gameMode === 'timed' ? '#ff6600' : '#00f0ff',
+                    boxShadow: `0 0 20px ${gameMode === 'timed' ? '#ff660040' : '#00f0ff40'}`,
+                  }}>
                   <div className="grid grid-cols-2 gap-3 text-left">
-                    <div><div className="text-[10px] text-text-muted">SCORE</div><div className="text-xl font-bold">{score.toLocaleString()}</div></div>
-                    <div><div className="text-[10px] text-text-muted">TIME</div><div className="text-xl font-bold">{Math.floor(gameTime / 60000)}:{((gameTime % 60000) / 1000).toFixed(0).padStart(2, '0')}</div></div>
-                    <div><div className="text-[10px] text-text-muted">MAX COMBO</div><div className="text-xl font-bold text-neon-amber">x{maxCombo}</div></div>
-                    <div><div className="text-[10px] text-text-muted">CLEARED</div><div className="text-xl font-bold text-neon-cyan">{tilesCleared}</div></div>
+                    <div>
+                      <div className="text-[10px] text-text-muted">FINAL SCORE</div>
+                      <div className="text-2xl font-bold font-impact">{score.toLocaleString()}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-text-muted">
+                        {gameMode === 'timed' ? 'BEST SCORE' : 'TIME'}
+                      </div>
+                      <div className="text-xl font-bold">
+                        {gameMode === 'timed'
+                          ? (Math.max(score, timedHighScore)).toLocaleString()
+                          : `${Math.floor(gameTime / 60000)}:${((gameTime % 60000) / 1000).toFixed(0).padStart(2, '0')}`
+                        }
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-text-muted">MAX COMBO</div>
+                      <div className="text-xl font-bold text-neon-amber">x{maxCombo}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-text-muted">CLEARED</div>
+                      <div className="text-xl font-bold text-neon-cyan">{tilesCleared}</div>
+                    </div>
                   </div>
                 </div>
 
                 <div className="flex flex-col gap-2">
                   <motion.button
-                    className="bg-neon-cyan text-void-black px-6 py-3 rounded-lg font-rajdhani font-bold text-lg w-full"
-                    whileHover={{ scale: 1.02 }}
+                    className="bg-gradient-to-r from-orange-500 to-red-500 text-white px-6 py-3 rounded-lg font-rajdhani font-bold text-lg w-full"
+                    style={{ boxShadow: '0 0 20px #ff660060' }}
+                    whileHover={{ scale: 1.02, boxShadow: '0 0 30px #ff6600' }}
                     whileTap={{ scale: 0.98 }}
                     onClick={restartGame}
                   >
-                    PLAY AGAIN
+                    {gameMode === 'timed' ? 'TRY AGAIN' : 'PLAY AGAIN'}
                   </motion.button>
-                  <motion.button
-                    className="bg-void-surface border-2 border-neon-violet text-neon-violet px-4 py-2 rounded-lg font-rajdhani font-bold w-full"
-                    whileHover={{ scale: 1.02 }}
-                    onClick={shareResults}
-                  >
-                    {showShareCopied ? 'COPIED!' : 'SHARE'}
-                  </motion.button>
+                  <div className="flex gap-2">
+                    <motion.button
+                      className="flex-1 bg-void-surface border-2 border-neon-violet text-neon-violet px-4 py-2 rounded-lg font-rajdhani font-bold"
+                      whileHover={{ scale: 1.02 }}
+                      onClick={shareResults}
+                    >
+                      {showShareCopied ? 'COPIED!' : 'SHARE'}
+                    </motion.button>
+                    <motion.button
+                      className="flex-1 bg-void-surface border border-neon-cyan text-neon-cyan px-4 py-2 rounded-lg font-rajdhani"
+                      whileHover={{ scale: 1.02 }}
+                      onClick={goToModeSelect}
+                    >
+                      MODES
+                    </motion.button>
+                  </div>
                   <motion.button
                     className="bg-void-surface border border-void-border text-text-muted px-4 py-2 rounded-lg font-rajdhani w-full hover:border-neon-magenta hover:text-neon-magenta"
                     whileHover={{ scale: 1.02 }}
@@ -1390,7 +1672,10 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
         {/* Footer - Instructions */}
         <div className="text-center py-2">
           <span className="text-text-muted text-xs font-exo">
-            SWIPE to swap adjacent tiles • Match 3+ in a row to clear • Build cascades!
+            {gameMode === 'timed'
+              ? 'SWIPE fast! Match 3+ • Build combos for HUGE points!'
+              : 'SWIPE to swap • Match 3+ in a row • Build cascades!'
+            }
           </span>
         </div>
       </motion.div>

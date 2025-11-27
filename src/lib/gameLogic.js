@@ -30,10 +30,13 @@ export const GAME_CONFIG = {
   CLEAR_ENTROPY_REDUCTION: 15,
   SPAWN_ENTROPY_INCREASE: 10,
 
-  // Scoring
-  BASE_POINTS_PER_CLEAR: 10,
-  COMBO_MULTIPLIER: 1.5,
-  CASCADE_BONUS: 1.25, // 25% bonus per cascade level
+  // Scoring - Aggressive multipliers for satisfying feedback
+  BASE_POINTS_PER_CLEAR: 15,
+  COMBO_MULTIPLIER: 2.0,    // Combos now DOUBLE (x2, x4, x8, x16...)
+  CASCADE_BONUS: 1.5,       // 50% bonus per cascade level (was 25%)
+
+  // Timed Mode
+  TIMED_MODE_DURATION: 60,  // 60 seconds per round
 
   // Flow/Difficulty Progression
   DIFFICULTY_RAMP_INTERVAL: 30000, // Increase difficulty every 30 seconds
@@ -179,41 +182,66 @@ export function calculateReward(basePoints, comboCount, cascadeLevel = 0, isCrit
   }
 
   let points = basePoints;
+  let totalMultiplier = 1;
 
-  // Apply combo multiplier
+  // Apply combo multiplier - EXPONENTIAL growth feels powerful
   if (comboCount > 1) {
-    points *= Math.pow(GAME_CONFIG.COMBO_MULTIPLIER, comboCount - 1);
+    const comboMult = Math.pow(GAME_CONFIG.COMBO_MULTIPLIER, comboCount - 1);
+    points *= comboMult;
+    totalMultiplier *= comboMult;
   }
 
   // Apply cascade bonus
   if (cascadeLevel > 0) {
-    points *= Math.pow(GAME_CONFIG.CASCADE_BONUS, cascadeLevel);
+    const cascadeMult = Math.pow(GAME_CONFIG.CASCADE_BONUS, cascadeLevel);
+    points *= cascadeMult;
+    totalMultiplier *= cascadeMult;
   }
 
   // Apply critical multiplier (POSITIVE PREDICTION ERROR)
   if (isCritical) {
     points *= GAME_CONFIG.CRITICAL_MULTIPLIER;
+    totalMultiplier *= GAME_CONFIG.CRITICAL_MULTIPLIER;
+
+    const megaPoints = Math.floor(points);
+    return {
+      points: megaPoints,
+      isCritical: true,
+      totalMultiplier: Math.floor(totalMultiplier * 10) / 10,
+      message: cascadeLevel > 0 ? `MEGA CASCADE x${Math.floor(totalMultiplier)}!` : 'CRITICAL HIT!',
+      screenShake: true,
+    };
+  }
+
+  // Special messages for high combos
+  if (comboCount >= 5) {
     return {
       points: Math.floor(points),
-      isCritical: true,
-      message: cascadeLevel > 0 ? `CASCADE CRITICAL x${cascadeLevel + 1}!` : 'CRITICAL CLEAR!',
+      isCritical: false,
+      totalMultiplier: Math.floor(totalMultiplier * 10) / 10,
+      message: comboCount >= 8 ? 'UNSTOPPABLE!' : comboCount >= 6 ? 'ON FIRE!' : 'COMBO FRENZY!',
+      screenShake: comboCount >= 6,
     };
   }
 
   // Special messages for cascades
   if (cascadeLevel > 0) {
-    const cascadeMessages = ['CHAIN!', 'DOUBLE CHAIN!', 'TRIPLE CHAIN!', 'MEGA CHAIN!', 'ULTRA CHAIN!'];
+    const cascadeMessages = ['CHAIN!', 'DOUBLE!', 'TRIPLE!', 'MEGA!', 'ULTRA!', 'GODLIKE!'];
     return {
       points: Math.floor(points),
       isCritical: false,
+      totalMultiplier: Math.floor(totalMultiplier * 10) / 10,
       message: cascadeMessages[Math.min(cascadeLevel - 1, cascadeMessages.length - 1)],
+      screenShake: cascadeLevel >= 3,
     };
   }
 
   return {
     points: Math.floor(points),
     isCritical: false,
+    totalMultiplier: 1,
     message: null,
+    screenShake: false,
   };
 }
 
