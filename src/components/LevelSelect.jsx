@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import AppShell from './layout/AppShell';
 import TilePreview from './layout/TilePreview';
@@ -11,6 +11,7 @@ import {
   getTotalStars,
   getMaxStars,
   getGoalDescription,
+  LEVEL_PROGRESS_UPDATED_EVENT,
 } from '../lib/levels';
 
 /**
@@ -19,9 +20,29 @@ import {
  */
 export default function LevelSelect({ onSelectLevel, onBack }) {
   const [selectedWorld, setSelectedWorld] = useState(1);
-  const progress = useMemo(() => getLevelProgress(), []);
-  const totalStars = useMemo(() => getTotalStars(), []);
-  const maxStars = useMemo(() => getMaxStars(), []);
+  const [progress, setProgress] = useState(() => getLevelProgress());
+  const [totalStars, setTotalStars] = useState(() => getTotalStars());
+  const [maxStars, setMaxStars] = useState(() => getMaxStars());
+
+  useEffect(() => {
+    const refreshProgress = () => {
+      setProgress(getLevelProgress());
+      setTotalStars(getTotalStars());
+      setMaxStars(getMaxStars());
+    };
+
+    refreshProgress();
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener(LEVEL_PROGRESS_UPDATED_EVENT, refreshProgress);
+
+      return () => {
+        window.removeEventListener(LEVEL_PROGRESS_UPDATED_EVENT, refreshProgress);
+      };
+    }
+
+    return undefined;
+  }, []);
 
   // Get levels for selected world
   const worldLevels = useMemo(() => {

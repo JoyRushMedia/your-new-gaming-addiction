@@ -684,6 +684,8 @@ export function getLevelProgress() {
   return defaultProgress();
 }
 
+export const LEVEL_PROGRESS_UPDATED_EVENT = 'level-progress-updated';
+
 /**
  * Save level progress
  * @param {Object} progress - Progress object
@@ -759,6 +761,11 @@ export function completeLevel(levelId, score, time, tilesCleared) {
   }
 
   saveLevelProgress(progress);
+
+  // Notify listeners of progress updates (e.g., level select screen)
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(LEVEL_PROGRESS_UPDATED_EVENT, { detail: { levelId } }));
+  }
 
   return {
     newStars: Math.max(newStars, previousStars),
