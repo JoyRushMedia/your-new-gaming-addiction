@@ -10,21 +10,35 @@ class SoundManager {
     this.volume = 0.3;
   }
 
+  getAudioContextConstructor() {
+    if (typeof window === 'undefined') return null;
+    return window.AudioContext || window.webkitAudioContext || null;
+  }
+
   init() {
+    const AudioContextConstructor = this.getAudioContextConstructor();
+    if (!AudioContextConstructor) {
+      return this;
+    }
+
     if (!this.audioContext) {
-      this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      this.audioContext = new AudioContextConstructor();
     }
     return this;
   }
 
   ensureContext() {
+    const AudioContextConstructor = this.getAudioContextConstructor();
+    if (!AudioContextConstructor) return false;
+
     if (!this.audioContext) {
-      this.init();
+      this.audioContext = new AudioContextConstructor();
     }
     // Resume context if suspended (browsers require user interaction)
     if (this.audioContext.state === 'suspended') {
       this.audioContext.resume();
     }
+    return true;
   }
 
   setEnabled(enabled) {
@@ -40,8 +54,7 @@ class SoundManager {
    * @param {number} pitch - Pitch multiplier (higher = higher pitch)
    */
   playClear(pitch = 1) {
-    if (!this.enabled) return;
-    this.ensureContext();
+    if (!this.enabled || !this.ensureContext()) return;
 
     const oscillator = this.audioContext.createOscillator();
     const gainNode = this.audioContext.createGain();
@@ -65,8 +78,7 @@ class SoundManager {
    * @param {number} comboLevel - Current combo multiplier
    */
   playCombo(comboLevel) {
-    if (!this.enabled) return;
-    this.ensureContext();
+    if (!this.enabled || !this.ensureContext()) return;
 
     const baseFreq = 300 + (comboLevel * 100);
 
@@ -91,8 +103,7 @@ class SoundManager {
    * Play critical clear sound (special effect)
    */
   playCritical() {
-    if (!this.enabled) return;
-    this.ensureContext();
+    if (!this.enabled || !this.ensureContext()) return;
 
     // Layer multiple oscillators for a richer sound
     const frequencies = [523.25, 659.25, 783.99]; // C5, E5, G5 (C major chord)
@@ -122,8 +133,7 @@ class SoundManager {
    * Play spawn sound (subtle whoosh)
    */
   playSpawn() {
-    if (!this.enabled) return;
-    this.ensureContext();
+    if (!this.enabled || !this.ensureContext()) return;
 
     const oscillator = this.audioContext.createOscillator();
     const gainNode = this.audioContext.createGain();
@@ -151,8 +161,7 @@ class SoundManager {
    * Play near miss warning sound
    */
   playNearMiss() {
-    if (!this.enabled) return;
-    this.ensureContext();
+    if (!this.enabled || !this.ensureContext()) return;
 
     // Two-tone warning sound
     [0, 0.15].forEach((delay, index) => {
@@ -178,8 +187,7 @@ class SoundManager {
    * Play big clear sound (match 4+)
    */
   playBigClear() {
-    if (!this.enabled) return;
-    this.ensureContext();
+    if (!this.enabled || !this.ensureContext()) return;
 
     const oscillator = this.audioContext.createOscillator();
     const gainNode = this.audioContext.createGain();
@@ -203,8 +211,7 @@ class SoundManager {
    * Play game over sound (descending, dramatic)
    */
   playGameOver() {
-    if (!this.enabled) return;
-    this.ensureContext();
+    if (!this.enabled || !this.ensureContext()) return;
 
     // Descending dramatic tone
     const frequencies = [440, 392, 349, 294]; // A4, G4, F4, D4
@@ -235,8 +242,7 @@ class SoundManager {
    * Play streak milestone sound (celebratory)
    */
   playStreakMilestone() {
-    if (!this.enabled) return;
-    this.ensureContext();
+    if (!this.enabled || !this.ensureContext()) return;
 
     // Ascending fanfare
     const frequencies = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
@@ -266,8 +272,7 @@ class SoundManager {
    * Play difficulty increase warning
    */
   playDifficultyUp() {
-    if (!this.enabled) return;
-    this.ensureContext();
+    if (!this.enabled || !this.ensureContext()) return;
 
     const oscillator = this.audioContext.createOscillator();
     const gainNode = this.audioContext.createGain();
