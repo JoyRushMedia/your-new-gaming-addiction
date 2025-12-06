@@ -3,99 +3,15 @@ import { motion, AnimatePresence } from 'framer-motion';
 import GameBoard from './components/GameBoard';
 import LevelSelect from './components/LevelSelect';
 import { getTotalStars, getMaxStars } from './lib/levels';
+import NeonFrame from './components/layout/NeonFrame';
+import AppShell from './components/layout/AppShell';
+import TilePreview from './components/layout/TilePreview';
+import { defaultMotionConfig } from './lib/designTokens';
 
 /**
  * Main App Component
  * Manages game states: home, playing, help
  */
-
-// Tile icon SVGs for display
-const TilePreview = ({ type, size = 40 }) => {
-  const configs = {
-    cyan: {
-      gradient: 'linear-gradient(135deg, #00f0ff 0%, #0080ff 50%, #00f0ff 100%)',
-      border: '#00f0ff',
-      icon: (
-        <path
-          d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"
-          fill="#001a1f"
-          stroke="#001a1f"
-          strokeWidth="1.5"
-        />
-      ),
-      name: 'Energy',
-    },
-    magenta: {
-      gradient: 'linear-gradient(135deg, #ff00ff 0%, #ff0080 50%, #ff00ff 100%)',
-      border: '#ff00ff',
-      icon: (
-        <>
-          <path
-            d="M12 2l8 4.5v9L12 20l-8-4.5v-9L12 2z"
-            fill="#1f001f"
-            stroke="#1f001f"
-            strokeWidth="1.5"
-          />
-          <circle cx="12" cy="11" r="3" fill="rgba(255,255,255,0.3)" />
-        </>
-      ),
-      name: 'Plasma',
-    },
-    amber: {
-      gradient: 'linear-gradient(135deg, #ffb000 0%, #ff6600 50%, #ffb000 100%)',
-      border: '#ffb000',
-      icon: (
-        <>
-          <path
-            d="M12 2l10 10-10 10L2 12 12 2z"
-            fill="#1f1000"
-            stroke="#1f1000"
-            strokeWidth="1.5"
-          />
-          <path d="M12 6l6 6-6 6-6-6 6-6z" fill="rgba(255,255,255,0.2)" />
-        </>
-      ),
-      name: 'Core',
-    },
-    violet: {
-      gradient: 'linear-gradient(135deg, #a855f7 0%, #6b21a8 50%, #a855f7 100%)',
-      border: '#a855f7',
-      icon: (
-        <path
-          d="M12 2l2.4 7.4h7.6l-6 4.6 2.3 7.4L12 17l-6.3 4.4 2.3-7.4-6-4.6h7.6L12 2z"
-          fill="#0f0520"
-          stroke="#0f0520"
-          strokeWidth="1.5"
-        />
-      ),
-      name: 'Void',
-    },
-  };
-
-  const config = configs[type];
-
-  return (
-    <div className="flex flex-col items-center gap-1">
-      <motion.div
-        className="rounded-lg flex items-center justify-center"
-        style={{
-          width: size,
-          height: size,
-          background: config.gradient,
-          border: `2px solid ${config.border}`,
-          boxShadow: `0 0 15px ${config.border}, inset 0 2px 4px rgba(255,255,255,0.3)`,
-        }}
-        whileHover={{ scale: 1.1 }}
-      >
-        <svg width={size * 0.6} height={size * 0.6} viewBox="0 0 24 24" fill="none">
-          {config.icon}
-        </svg>
-      </motion.div>
-      <span className="text-text-muted text-xs">{config.name}</span>
-    </div>
-  );
-};
-
 export default function App() {
   const [gameState, setGameState] = useState('home'); // 'home', 'playing', 'levelSelect', 'levelPlaying'
   const [showHelp, setShowHelp] = useState(false);
@@ -124,29 +40,82 @@ export default function App() {
     // State stays as 'levelPlaying', GameBoard will re-initialize with new level
   };
 
+  const renderPlayShell = (key, boardProps) => (
+    <motion.div
+      key={key}
+      className="w-full h-full"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={defaultMotionConfig.transitions.default}
+    >
+      <AppShell
+        header={(
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs uppercase tracking-widest text-text-muted font-rajdhani">Arcade Shell</div>
+              <h2 className="text-impact text-2xl text-neon-cyan" style={{ textShadow: '0 0 20px #00f0ff' }}>
+                Entropy Reduction
+              </h2>
+            </div>
+            <div className="flex gap-2">
+              <motion.button
+                className="chamfer-sm bg-void-surface border border-neon-cyan/60 text-neon-cyan px-4 py-2 text-sm font-rajdhani"
+                whileHover={defaultMotionConfig.hover}
+                whileTap={defaultMotionConfig.tap}
+                onClick={() => setShowHelp(true)}
+              >
+                HOW TO PLAY
+              </motion.button>
+              <motion.button
+                className="chamfer-sm bg-void-surface border border-void-border text-text-muted px-4 py-2 text-sm font-rajdhani"
+                whileHover={defaultMotionConfig.hover}
+                whileTap={defaultMotionConfig.tap}
+                onClick={goHome}
+              >
+                EXIT
+              </motion.button>
+            </div>
+          </div>
+        )}
+        hud={(
+          <div className="flex flex-wrap gap-3 text-xs md:text-sm">
+            <span className="text-text-muted">Swipe to swap • Match 3+ • Build cascades for massive score.</span>
+            <span className="text-neon-amber font-semibold">Motion ready — configurable via design tokens.</span>
+          </div>
+        )}
+        sidebar={(
+          <div className="flex flex-col gap-4 h-full">
+            <div className="flex items-center justify-between">
+              <span className="text-xs uppercase tracking-widest text-text-muted font-rajdhani">Tile Codex</span>
+              <span className="text-[10px] text-text-muted">Match to clear</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <TilePreview type="cyan" size={50} />
+              <TilePreview type="magenta" size={50} />
+              <TilePreview type="amber" size={50} />
+              <TilePreview type="violet" size={50} />
+            </div>
+            <div className="text-xs text-text-muted">
+              Build chains and keep entropy low. Animated UI responds to the shared motion theme.
+            </div>
+          </div>
+        )}
+        padding="md"
+      >
+        <div className="flex-1 min-h-0">
+          <GameBoard
+            onHome={goHome}
+            onHelp={() => setShowHelp(true)}
+            {...boardProps}
+          />
+        </div>
+      </AppShell>
+    </motion.div>
+  );
+
   return (
-    <div className="w-screen h-screen bg-void-black overflow-hidden relative">
-      {/* Ambient scanline overlay */}
-      <div className="scanlines absolute inset-0 pointer-events-none z-[100] opacity-30" />
-
-      {/* Animated background grid */}
-      <div
-        className="absolute inset-0 opacity-5 pointer-events-none"
-        style={{
-          backgroundImage: `
-            linear-gradient(to right, #00f0ff 1px, transparent 1px),
-            linear-gradient(to bottom, #00f0ff 1px, transparent 1px)
-          `,
-          backgroundSize: '50px 50px',
-        }}
-      />
-
-      {/* Corner decorations */}
-      <div className="absolute top-0 left-0 w-24 md:w-32 h-24 md:h-32 border-l-2 border-t-2 border-neon-cyan opacity-20 pointer-events-none" />
-      <div className="absolute top-0 right-0 w-24 md:w-32 h-24 md:h-32 border-r-2 border-t-2 border-neon-cyan opacity-20 pointer-events-none" />
-      <div className="absolute bottom-0 left-0 w-24 md:w-32 h-24 md:h-32 border-l-2 border-b-2 border-neon-cyan opacity-20 pointer-events-none" />
-      <div className="absolute bottom-0 right-0 w-24 md:w-32 h-24 md:h-32 border-r-2 border-b-2 border-neon-cyan opacity-20 pointer-events-none" />
-
+    <NeonFrame>
       <AnimatePresence mode="wait">
         {gameState === 'home' && (
           <HomeScreen
@@ -156,18 +125,7 @@ export default function App() {
             onHelp={() => setShowHelp(true)}
           />
         )}
-        {gameState === 'playing' && (
-          <motion.div
-            key="game"
-            className="w-full h-full"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            <GameBoard onHome={goHome} onHelp={() => setShowHelp(true)} />
-          </motion.div>
-        )}
+        {gameState === 'playing' && renderPlayShell('game', {})}
         {gameState === 'levelSelect' && (
           <motion.div
             key="levelSelect"
@@ -175,7 +133,7 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
+            transition={defaultMotionConfig.transitions.default}
           >
             <LevelSelect
               onSelectLevel={startLevel}
@@ -183,24 +141,11 @@ export default function App() {
             />
           </motion.div>
         )}
-        {gameState === 'levelPlaying' && (
-          <motion.div
-            key={`level-${currentLevelId}`}
-            className="w-full h-full"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            <GameBoard
-              onHome={goHome}
-              onHelp={() => setShowHelp(true)}
-              levelId={currentLevelId}
-              onNextLevel={handleNextLevel}
-              onLevelSelect={openLevelSelect}
-            />
-          </motion.div>
-        )}
+        {gameState === 'levelPlaying' && renderPlayShell(`level-${currentLevelId}`, {
+          levelId: currentLevelId,
+          onNextLevel: handleNextLevel,
+          onLevelSelect: openLevelSelect,
+        })}
       </AnimatePresence>
 
       {/* Help Modal - accessible from anywhere */}
@@ -209,80 +154,113 @@ export default function App() {
           <HelpModal onClose={() => setShowHelp(false)} />
         )}
       </AnimatePresence>
-    </div>
+    </NeonFrame>
   );
 }
 
 /**
  * Home Screen Component
  */
-function HomeScreen({ onStart, onChallengeMode, onHelp }) {
+function HomeScreen({ onStart, onChallengeMode, onHelp, motionConfig = defaultMotionConfig }) {
   const totalStars = getTotalStars();
   const maxStars = getMaxStars();
-  return (
+
+  const header = (
     <motion.div
-      className="w-full h-full flex flex-col items-center justify-center p-4 md:p-8"
+      className="text-center md:text-left"
+      initial={{ y: -30, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      transition={{ delay: 0.1, type: 'spring', stiffness: 200 }}
+    >
+      <motion.h1
+        className="text-impact text-4xl md:text-7xl text-neon-cyan mb-2"
+        style={{ textShadow: '0 0 30px #00f0ff, 0 0 60px #00f0ff' }}
+        animate={{
+          textShadow: [
+            '0 0 30px #00f0ff, 0 0 60px #00f0ff',
+            '0 0 50px #00f0ff, 0 0 100px #00f0ff',
+            '0 0 30px #00f0ff, 0 0 60px #00f0ff',
+          ],
+        }}
+        transition={{ duration: 3, repeat: Infinity }}
+      >
+        ENTROPY
+      </motion.h1>
+      <h2
+        className="text-impact text-2xl md:text-4xl text-neon-violet mb-2"
+        style={{ textShadow: '0 0 20px #a855f7' }}
+      >
+        REDUCTION
+      </h2>
+      <p className="text-header text-text-muted text-sm md:text-lg tracking-aggressive">
+        High-Velocity Cognitive Arcade
+      </p>
+      <div
+        className="mx-auto md:mx-0 mt-4 md:mt-6 h-[2px] bg-gradient-to-r from-transparent via-neon-cyan to-transparent"
+        style={{ width: '80%', maxWidth: '500px' }}
+      />
+    </motion.div>
+  );
+
+  const hud = (
+    <div className="flex flex-wrap gap-3 items-center">
+      <div className="flex items-center gap-2 bg-void-surface/70 border border-void-border rounded-lg px-3 py-1.5">
+        <span className="text-neon-amber text-xl">★</span>
+        <div className="text-sm font-rajdhani">
+          <div className="text-text-muted uppercase tracking-widest">Stars</div>
+          <div className="text-white font-semibold">{totalStars}/{maxStars}</div>
+        </div>
+      </div>
+      <div className="text-xs text-text-muted font-exo">
+        Built on new layout primitives for future modes and panels.
+      </div>
+    </div>
+  );
+
+  const sidebar = (
+    <div className="flex flex-col gap-4 h-full justify-between">
+      <div>
+        <div className="text-xs uppercase tracking-widest text-text-muted font-rajdhani">Tile Codex</div>
+        <div className="grid grid-cols-2 gap-3 mt-3">
+          <TilePreview type="cyan" size={52} />
+          <TilePreview type="magenta" size={52} />
+          <TilePreview type="amber" size={52} />
+          <TilePreview type="violet" size={52} />
+        </div>
+      </div>
+      <div className="text-xs text-text-muted">
+        Glowing tiles are clearable. Dim variants need larger matches — plan cascades to trigger chain reactions.
+      </div>
+    </div>
+  );
+
+  const footer = (
+    <motion.p
+      className="text-text-muted text-xs md:text-sm font-exo"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.3 }}
+      transition={{ delay: 0.5 }}
     >
-      {/* Title */}
-      <motion.div
-        className="text-center mb-8 md:mb-12"
-        initial={{ y: -30, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ delay: 0.1, type: 'spring', stiffness: 200 }}
-      >
-        <motion.h1
-          className="text-impact text-4xl md:text-7xl text-neon-cyan mb-4"
-          style={{ textShadow: '0 0 30px #00f0ff, 0 0 60px #00f0ff' }}
-          animate={{
-            textShadow: [
-              '0 0 30px #00f0ff, 0 0 60px #00f0ff',
-              '0 0 50px #00f0ff, 0 0 100px #00f0ff',
-              '0 0 30px #00f0ff, 0 0 60px #00f0ff',
-            ],
-          }}
-          transition={{ duration: 3, repeat: Infinity }}
-        >
-          ENTROPY
-        </motion.h1>
-        <h2 className="text-impact text-2xl md:text-4xl text-neon-violet mb-2"
-          style={{ textShadow: '0 0 20px #a855f7' }}>
-          REDUCTION
-        </h2>
-        <p className="text-header text-text-muted text-sm md:text-lg tracking-aggressive">
-          High-Velocity Cognitive Arcade
-        </p>
-        <div
-          className="mx-auto mt-4 md:mt-6 h-[2px] bg-gradient-to-r from-transparent via-neon-cyan to-transparent"
-          style={{ width: '80%', maxWidth: '500px' }}
-        />
-      </motion.div>
+      Press <span className="text-neon-cyan">[SPACE]</span> or <span className="text-neon-cyan">[ENTER]</span> to start
+    </motion.p>
+  );
 
-      {/* Quick Overview */}
+  return (
+    <AppShell header={header} hud={hud} sidebar={sidebar} footer={footer} padding="lg">
       <motion.div
-        className="chamfer-lg bg-void-surface/50 border border-void-border p-4 md:p-6 mb-6 md:mb-8 max-w-lg text-center"
+        className="chamfer-lg bg-void-surface/50 border border-void-border p-4 md:p-6"
         initial={{ y: 20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ delay: 0.2 }}
       >
-        <p className="text-text-primary font-exo mb-4 text-sm md:text-base">
+        <p className="text-text-primary font-exo mb-4 text-sm md:text-base text-center md:text-left">
           Match <span className="text-neon-cyan font-bold">3 or more</span> tiles to clear them.
           Tiles fall and create <span className="text-neon-amber font-bold">chain reactions</span>!
         </p>
-        <div className="flex justify-center gap-3 md:gap-6">
-          <TilePreview type="cyan" size={44} />
-          <TilePreview type="magenta" size={44} />
-          <TilePreview type="amber" size={44} />
-          <TilePreview type="violet" size={44} />
-        </div>
       </motion.div>
 
-      {/* Buttons */}
       <motion.div
-        className="flex flex-col gap-3 md:gap-4 w-full max-w-xs"
+        className="flex flex-col gap-3 md:gap-4 w-full max-w-xl"
         initial={{ y: 20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ delay: 0.3 }}
@@ -290,26 +268,24 @@ function HomeScreen({ onStart, onChallengeMode, onHelp }) {
         <motion.button
           className="chamfer-sm bg-neon-cyan text-void-black px-8 md:px-12 py-3 md:py-4 font-rajdhani font-bold text-xl md:text-2xl tracking-wider"
           style={{ boxShadow: '0 0 30px #00f0ff' }}
-          whileHover={{ scale: 1.05, boxShadow: '0 0 50px #00f0ff' }}
-          whileTap={{ scale: 0.95 }}
+          whileHover={motionConfig.hover}
+          whileTap={motionConfig.tap}
           onClick={onStart}
         >
           ENDLESS MODE
         </motion.button>
 
-        {/* Challenge Mode - Primary feature for Zeigarnik effect */}
         <motion.button
           className="chamfer-sm bg-void-surface border-2 border-neon-amber text-neon-amber px-8 md:px-12 py-3 md:py-4 font-rajdhani font-bold text-lg md:text-xl tracking-wider relative overflow-hidden"
           style={{ boxShadow: '0 0 25px #ffb00060' }}
-          whileHover={{ scale: 1.05, boxShadow: '0 0 40px #ffb000' }}
-          whileTap={{ scale: 0.95 }}
+          whileHover={motionConfig.hover}
+          whileTap={motionConfig.tap}
           onClick={onChallengeMode}
         >
-          {/* Shimmer effect */}
           <motion.div
             className="absolute inset-0 opacity-20"
             style={{ background: 'linear-gradient(90deg, transparent, rgba(255,176,0,0.4), transparent)' }}
-            animate={{ x: ['-100%', '100%'] }}
+            animate={motionConfig.enabled ? { x: ['-100%', '100%'] } : undefined}
             transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
           />
           <span className="relative z-10">CHALLENGE MODE</span>
@@ -322,27 +298,16 @@ function HomeScreen({ onStart, onChallengeMode, onHelp }) {
 
         <motion.button
           className="chamfer-sm bg-void-surface border-2 border-neon-violet text-neon-violet px-8 md:px-12 py-2 md:py-3 font-rajdhani font-bold text-base md:text-lg tracking-wider"
-          whileHover={{ scale: 1.05, boxShadow: '0 0 20px #a855f7' }}
-          whileTap={{ scale: 0.95 }}
+          whileHover={motionConfig.hover}
+          whileTap={motionConfig.tap}
           onClick={onHelp}
         >
           HOW TO PLAY
         </motion.button>
       </motion.div>
 
-      {/* Keyboard hint */}
-      <motion.p
-        className="mt-6 md:mt-8 text-text-muted text-xs md:text-sm font-exo"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.5 }}
-      >
-        Press <span className="text-neon-cyan">[SPACE]</span> or <span className="text-neon-cyan">[ENTER]</span> to start
-      </motion.p>
-
-      {/* Keyboard listener for home screen */}
       <HomeKeyboardListener onStart={onStart} />
-    </motion.div>
+    </AppShell>
   );
 }
 
