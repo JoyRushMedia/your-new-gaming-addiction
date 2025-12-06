@@ -196,7 +196,9 @@ function Tile({
   tile,
   onClear,
   onSwap,
+  onSelect,
   isClearable,
+  isSelected = false,
   cellSize = 60,
   gridGap = 4,
   isNew = false,
@@ -217,10 +219,13 @@ function Tile({
   const pixelX = tile.x * (cellSize + gridGap);
   const pixelY = tile.y * (cellSize + gridGap);
 
-  // Handle click/tap - clear if clearable (for auto-matched tiles)
+  // Handle click/tap - use onSelect for click-to-select swap, or clear if clearable
   const handleClick = () => {
     if (isDragging) return;
-    if (isClearable) {
+    // Prefer onSelect for unified click handling (supports click-to-swap)
+    if (onSelect) {
+      onSelect(tile);
+    } else if (isClearable) {
       onClear(tile.id);
     }
   };
@@ -438,6 +443,17 @@ function Tile({
             }}
           />
         )}
+
+        {/* Selection indicator - cyan pulsing ring for click-to-select */}
+        {isSelected && (
+          <div
+            className="absolute inset-[-4px] pointer-events-none rounded-xl animate-pulse"
+            style={{
+              border: '3px solid #00f0ff',
+              boxShadow: '0 0 20px #00f0ff, inset 0 0 10px rgba(0, 240, 255, 0.3)',
+            }}
+          />
+        )}
       </motion.div>
     </motion.div>
   );
@@ -449,6 +465,7 @@ const propsAreEqual = (prev, next) => {
   if (prev.isNew !== next.isNew) return false;
   if (prev.isSwapping !== next.isSwapping) return false;
   if (prev.isHinted !== next.isHinted) return false;
+  if (prev.isSelected !== next.isSelected) return false;
 
   const prevTile = prev.tile;
   const nextTile = next.tile;
