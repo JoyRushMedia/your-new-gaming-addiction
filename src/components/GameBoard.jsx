@@ -36,7 +36,10 @@ import { soundManager } from '../lib/sounds';
  * Features: Swipe to swap, 3-in-a-row matching, smart spawning, cascades
  */
 
-const GRID_SIZE = 8;
+const GRID_SIZE = GAME_CONFIG.GRID_SIZE;
+const BASE_CELL_SIZE = GAME_CONFIG.CELL_SIZE;
+const MIN_CELL_SIZE = 50;
+const MAX_CELL_SIZE = 90;
 let tileIdCounter = 0;
 
 const GAME_PHASE = {
@@ -140,7 +143,9 @@ export default function GameBoard({
   const [levelTimeRemaining, setLevelTimeRemaining] = useState(null);
 
   // Responsive grid sizing
-  const [cellSize, setCellSize] = useState(70);
+  const [cellSize, setCellSize] = useState(() =>
+    Math.min(MAX_CELL_SIZE, Math.max(MIN_CELL_SIZE, BASE_CELL_SIZE))
+  );
   const containerRef = useRef(null);
 
   const gameBoardRef = useRef(null);
@@ -163,9 +168,13 @@ export default function GameBoard({
       // Calculate max cell size that fits
       const maxCellWidth = Math.floor((containerWidth - 40) / GRID_SIZE);
       const maxCellHeight = Math.floor((containerHeight - 40) / GRID_SIZE);
-      const newCellSize = Math.min(maxCellWidth, maxCellHeight, 90); // Max 90px
+      const responsiveTarget = Math.min(maxCellWidth, maxCellHeight);
+      const newCellSize = Math.min(
+        MAX_CELL_SIZE,
+        Math.max(MIN_CELL_SIZE, Math.min(responsiveTarget, BASE_CELL_SIZE))
+      );
 
-      setCellSize(Math.max(50, newCellSize)); // Min 50px
+      setCellSize(newCellSize);
     };
 
     updateGridSize();
@@ -195,7 +204,11 @@ export default function GameBoard({
 
   // Check for no valid moves (no swaps that create matches)
   const hasNoMoves = useMemo(() => {
-    return validMoves.length === 0 && clearableTileIds.length === 0 && tiles.length >= 8;
+    return (
+      validMoves.length === 0 &&
+      clearableTileIds.length === 0 &&
+      tiles.length >= GRID_SIZE * GRID_SIZE
+    );
   }, [validMoves.length, clearableTileIds.length, tiles.length]);
 
   // Show hint - highlight a random valid move
@@ -389,7 +402,7 @@ export default function GameBoard({
 
     const initialTiles = [];
 
-    // Create a FULL board (64 tiles for 8x8 grid)
+    // Create a FULL board based on configured grid size
     for (let y = 0; y < GRID_SIZE; y++) {
       for (let x = 0; x < GRID_SIZE; x++) {
         // Generate type that avoids creating initial matches
@@ -553,13 +566,13 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
   }, [togglePause, restartGame, onHelp, isGameOver]);
 
   // ============================================
-  // INITIALIZATION - Full 8x8 board (Candy Crush style)
+  // INITIALIZATION - Full grid based on configuration (Candy Crush style)
   // ============================================
 
   useEffect(() => {
     const initialTiles = [];
 
-    // Create a FULL board (64 tiles for 8x8 grid)
+    // Create a FULL board based on configured grid size
     // No more random partial boards - this is proper match-3
     for (let y = 0; y < GRID_SIZE; y++) {
       for (let x = 0; x < GRID_SIZE; x++) {
