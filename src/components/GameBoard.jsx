@@ -409,15 +409,15 @@ export default function GameBoard({
         let type;
         let attempts = 0;
 
-        do {
-          type = generateSmartTileType(x, y, initialTiles, GRID_SIZE);
-          const testTile = { id: tileIdCounter, x, y, type };
-          const testTiles = [...initialTiles, testTile];
-          const matches = findMatchingGroup(testTiles, tileIdCounter, GRID_SIZE);
+          do {
+            type = generateSmartTileType(x, y, initialTiles, GRID_SIZE);
+            const testTile = { id: tileIdCounter, x, y, type };
+            const testTiles = [...initialTiles, testTile];
+            const matches = findMatchingGroup(testTiles, tileIdCounter, GRID_SIZE)?.ids ?? [];
 
-          if (matches.length === 0 || attempts > 10) break;
-          attempts++;
-        } while (attempts <= 10);
+            if (matches.length === 0 || attempts > 10) break;
+            attempts++;
+          } while (attempts <= 10);
 
         initialTiles.push({
           id: tileIdCounter++,
@@ -580,16 +580,16 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
         let type;
         let attempts = 0;
 
-        do {
-          type = generateSmartTileType(x, y, initialTiles, GRID_SIZE);
-          const testTile = { id: tileIdCounter, x, y, type };
-          const testTiles = [...initialTiles, testTile];
-          const matches = findMatchingGroup(testTiles, tileIdCounter, GRID_SIZE);
+          do {
+            type = generateSmartTileType(x, y, initialTiles, GRID_SIZE);
+            const testTile = { id: tileIdCounter, x, y, type };
+            const testTiles = [...initialTiles, testTile];
+            const matches = findMatchingGroup(testTiles, tileIdCounter, GRID_SIZE)?.ids ?? [];
 
-          // If no match or too many attempts, accept this type
-          if (matches.length === 0 || attempts > 10) break;
-          attempts++;
-        } while (attempts <= 10);
+            // If no match or too many attempts, accept this type
+            if (matches.length === 0 || attempts > 10) break;
+            attempts++;
+          } while (attempts <= 10);
 
         initialTiles.push({
           id: tileIdCounter++,
@@ -911,8 +911,8 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
     });
 
     // Check if swap creates matches (check both tiles)
-    const matches1 = findMatchingGroup(swappedTiles, tile.id, GRID_SIZE);
-    const matches2 = findMatchingGroup(swappedTiles, targetTile.id, GRID_SIZE);
+    const matches1 = findMatchingGroup(swappedTiles, tile.id, GRID_SIZE)?.ids ?? [];
+    const matches2 = findMatchingGroup(swappedTiles, targetTile.id, GRID_SIZE)?.ids ?? [];
     const allMatches = [...new Set([...matches1, ...matches2])];
 
     if (allMatches.length > 0) {
@@ -955,7 +955,7 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
 
     initSound();
 
-    const matchingTileIds = findMatchingGroup(tiles, tileId, GRID_SIZE);
+    const matchingTileIds = findMatchingGroup(tiles, tileId, GRID_SIZE)?.ids ?? [];
     if (matchingTileIds.length === 0) return;
 
     const now = Date.now();
