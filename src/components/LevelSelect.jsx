@@ -67,7 +67,11 @@ export default function LevelSelect({ onSelectLevel, onBack }) {
   const header = (
     <div className="flex items-center justify-between gap-4">
       <motion.button
-        className="bg-void-surface border border-void-border rounded-lg px-4 py-2 text-text-muted font-rajdhani hover:border-neon-cyan hover:text-neon-cyan"
+        className={[
+          'bg-void-surface border border-void-border rounded-lg px-4 py-2',
+          'text-text-muted font-rajdhani',
+          'hover:border-neon-cyan hover:text-neon-cyan',
+        ].join(' ')}
         whileHover={defaultMotionConfig.hover}
         whileTap={defaultMotionConfig.tap}
         onClick={onBack}
