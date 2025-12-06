@@ -202,6 +202,12 @@ export default function GameBoard({
   const [showNoMoves, setShowNoMoves] = useState(false);
   const [hintTileIds, setHintTileIds] = useState(new Set());
 
+  // Click-to-select swap mechanism (fallback for swipe issues)
+  const [selectedTileId, setSelectedTileId] = useState(null);
+
+  // Phase recovery - timeout ref to prevent stuck states
+  const phaseRecoveryRef = useRef(null);
+
   // Check for no valid moves (no swaps that create matches)
   const hasNoMoves = useMemo(() => {
     return (
@@ -237,6 +243,30 @@ export default function GameBoard({
       setShowNoMoves(false);
     }
   }, [hasNoMoves, isPaused, isGameOver, gamePhase]);
+
+  // Phase recovery - reset to IDLE if stuck in non-IDLE phase too long
+  useEffect(() => {
+    if (phaseRecoveryRef.current) {
+      clearTimeout(phaseRecoveryRef.current);
+    }
+
+    if (gamePhase !== GAME_PHASE.IDLE && !isGameOver && !isPaused) {
+      // Set a recovery timeout - if phase doesn't change within 2 seconds, force reset
+      phaseRecoveryRef.current = setTimeout(() => {
+        console.warn('Phase recovery: resetting from stuck phase', gamePhase);
+        setGamePhase(GAME_PHASE.IDLE);
+        cascadeLevelRef.current = 0;
+        setSwappingTileIds(new Set());
+        setSelectedTileId(null);
+      }, 2000);
+    }
+
+    return () => {
+      if (phaseRecoveryRef.current) {
+        clearTimeout(phaseRecoveryRef.current);
+      }
+    };
+  }, [gamePhase, isGameOver, isPaused]);
 
   const gridPixelSize = cellSize * GRID_SIZE + (GRID_SIZE - 1) * 4; // cells + gaps
 
@@ -778,28 +808,34 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
       }
     }
 
-    // Enhanced screen flash based on reward analysis
-    const shouldFlash = combo >= 2 || currentCascadeLevel >= 1 || tilesToClearInput.length >= 4;
-    if (shouldFlash) {
-      const flashColor = reward.isCritical ? '#ffd700' :
-                         combo >= 5 ? '#ff6600' :
-                         combo >= 3 ? '#ffb000' :
-                         currentCascadeLevel >= 2 ? '#a855f7' :
-                         tilesToClearInput.length >= 5 ? '#00f0ff' : '#ffffff';
-      setScreenFlash(flashColor);
-      setTimeout(() => setScreenFlash(null), 120);
-    }
+    // Performance optimization: Reduce visual effects during rapid cascades
+    // Skip intensive effects after cascade level 3 to prevent lag
+    const skipIntensiveEffects = currentCascadeLevel >= 3;
 
-    // Screen shake for powerful plays
-    if (reward.screenShake || reward.isCritical || combo >= 4 || currentCascadeLevel >= 2) {
-      setShake(true);
-      setTimeout(() => setShake(false), 300);
-    }
+    // Enhanced screen flash based on reward analysis (skip during deep cascades)
+    if (!skipIntensiveEffects) {
+      const shouldFlash = combo >= 2 || currentCascadeLevel >= 1 || tilesToClearInput.length >= 4;
+      if (shouldFlash) {
+        const flashColor = reward.isCritical ? '#ffd700' :
+                           combo >= 5 ? '#ff6600' :
+                           combo >= 3 ? '#ffb000' :
+                           currentCascadeLevel >= 2 ? '#a855f7' :
+                           tilesToClearInput.length >= 5 ? '#00f0ff' : '#ffffff';
+        setScreenFlash(flashColor);
+        setTimeout(() => setScreenFlash(null), 120);
+      }
 
-    // Combo flash effect
-    if (combo >= 3) {
-      setComboFlash(true);
-      setTimeout(() => setComboFlash(false), 200);
+      // Screen shake for powerful plays
+      if (reward.screenShake || reward.isCritical || combo >= 4 || currentCascadeLevel >= 2) {
+        setShake(true);
+        setTimeout(() => setShake(false), 300);
+      }
+
+      // Combo flash effect
+      if (combo >= 3) {
+        setComboFlash(true);
+        setTimeout(() => setComboFlash(false), 200);
+      }
     }
 
     if (reward.message) {
@@ -816,7 +852,10 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
         setBigPlayMessage(null);
       }, 900);
     } else {
-      soundManager.playClear(1 + (tilesToClearInput.length - 3) * 0.2);
+      // Only play clear sound on first few cascades to reduce audio spam
+      if (currentCascadeLevel < 4) {
+        soundManager.playClear(1 + (tilesToClearInput.length - 3) * 0.2);
+      }
     }
 
     // Simplified cascade - single setTiles, use refs for cascade continuation
@@ -1008,6 +1047,64 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
 
     processCascadeStep(matchingTileIds, 0);
   }, [combo, lastClearTime, tiles, initSound, isGameOver, maxCombo, gamePhase, processCascadeStep]);
+
+  // ============================================
+  // CLICK-TO-SELECT SWAP HANDLER
+  // ============================================
+
+  const handleTileSelect = useCallback((tile) => {
+    if (isGameOver || gamePhase !== GAME_PHASE.IDLE) return;
+
+    initSound();
+
+    // If clicking on already selected tile, deselect
+    if (selectedTileId === tile.id) {
+      setSelectedTileId(null);
+      return;
+    }
+
+    // If no tile selected, select this one
+    if (selectedTileId === null) {
+      // First check if the tile is clearable - if so, clear it instead of selecting
+      if (clearableTileIds.includes(tile.id)) {
+        handleTileClear(tile.id);
+        return;
+      }
+      setSelectedTileId(tile.id);
+      return;
+    }
+
+    // A tile is already selected - check if this one is adjacent for swap
+    const selectedTile = tiles.find(t => t.id === selectedTileId);
+    if (!selectedTile) {
+      setSelectedTileId(tile.id);
+      return;
+    }
+
+    const dx = Math.abs(tile.x - selectedTile.x);
+    const dy = Math.abs(tile.y - selectedTile.y);
+    const isAdjacent = (dx === 1 && dy === 0) || (dx === 0 && dy === 1);
+
+    if (isAdjacent) {
+      // Determine swap direction and perform swap
+      let direction;
+      if (tile.x > selectedTile.x) direction = 'right';
+      else if (tile.x < selectedTile.x) direction = 'left';
+      else if (tile.y > selectedTile.y) direction = 'down';
+      else direction = 'up';
+
+      setSelectedTileId(null);
+      handleSwap(selectedTile, direction);
+    } else {
+      // Not adjacent - if clearable, clear it; otherwise select the new tile
+      if (clearableTileIds.includes(tile.id)) {
+        setSelectedTileId(null);
+        handleTileClear(tile.id);
+      } else {
+        setSelectedTileId(tile.id);
+      }
+    }
+  }, [isGameOver, gamePhase, selectedTileId, tiles, clearableTileIds, handleSwap, handleTileClear, initSound]);
 
   // ============================================
   // RENDER
@@ -1636,7 +1733,9 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
                     tile={tile}
                     onClear={handleTileClear}
                     onSwap={handleSwap}
+                    onSelect={handleTileSelect}
                     isClearable={clearableTileIds.includes(tile.id)}
+                    isSelected={selectedTileId === tile.id}
                     cellSize={cellSize}
                     gridGap={4}
                     isNew={newTileIds.has(tile.id)}
