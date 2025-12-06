@@ -852,11 +852,13 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
 
         // Schedule cascade check after gravity settles
         setTimeout(() => {
-          const matches = findAllMatches(newTiles, GRID_SIZE);
-          if (matches.length > 0 && currentCascadeLevel < MAX_CASCADE_LEVEL - 1) {
+          const matchPatterns = findAllMatches(newTiles, GRID_SIZE);
+          if (matchPatterns.length > 0 && currentCascadeLevel < MAX_CASCADE_LEVEL - 1) {
             cascadeLevelRef.current = currentCascadeLevel + 1;
             setMaxChain(prev => Math.max(prev, currentCascadeLevel + 1));
-            processCascadeStep(matches, currentCascadeLevel + 1);
+            // Extract tile IDs from pattern objects
+            const matchIds = matchPatterns.flatMap(m => m.ids);
+            processCascadeStep(matchIds, currentCascadeLevel + 1);
           } else {
             setGamePhase(GAME_PHASE.IDLE);
             cascadeLevelRef.current = 0;

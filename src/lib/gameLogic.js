@@ -604,22 +604,25 @@ export function classifyMatchShape(matchTiles) {
   }
 
   // Detect L shapes (two perpendicular arms)
-  const corners = [
-    { x: minX, y: minY },
-    { x: minX, y: maxY },
-    { x: maxX, y: minY },
-    { x: maxX, y: maxY },
+  // Check from each corner of the bounding box in the appropriate directions
+  const cornerConfigs = [
+    { x: minX, y: minY, hDir: 1, vDir: 1 },   // top-left: check right and down
+    { x: minX, y: maxY, hDir: 1, vDir: -1 },  // bottom-left: check right and up
+    { x: maxX, y: minY, hDir: -1, vDir: 1 },  // top-right: check left and down
+    { x: maxX, y: maxY, hDir: -1, vDir: -1 }, // bottom-right: check left and up
   ];
 
-  for (const corner of corners) {
+  for (const { x: cornerX, y: cornerY, hDir, vDir } of cornerConfigs) {
+    if (!hasPosition(cornerX, cornerY)) continue;
+
     let horizontal = 0;
     let vertical = 0;
 
-    while (hasPosition(corner.x + horizontal, corner.y)) horizontal++;
-    while (hasPosition(corner.x, corner.y + vertical)) vertical++;
+    while (hasPosition(cornerX + horizontal * hDir, cornerY)) horizontal++;
+    while (hasPosition(cornerX, cornerY + vertical * vDir)) vertical++;
 
     if (horizontal > 1 && vertical > 1 && horizontal + vertical - 1 === size) {
-      const orientation = `${corner.x === minX ? 'left' : 'right'}-${corner.y === minY ? 'up' : 'down'}`;
+      const orientation = `${cornerX === minX ? 'left' : 'right'}-${cornerY === minY ? 'up' : 'down'}`;
       return { shape: 'L', orientation, size };
     }
   }

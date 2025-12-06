@@ -19,6 +19,10 @@ export default {
           'amber': '#ffb000',
           'violet': '#a855f7',
         },
+        'text': {
+          'primary': '#e0e0ff',
+          'muted': '#8888aa',
+        },
         'chaos': '#ff3366',
         'order': '#00ff88',
       },
