@@ -473,21 +473,21 @@ export function getSpecialTileClearTargets(tile, allTiles, gridSize) {
 /**
  * Determine what special tile to create based on match pattern
  */
-export function determineSpecialTileFromMatch(matchedTiles) {
-  if (matchedTiles.length >= 5) {
+export function determineSpecialTileFromMatch(matchPattern) {
+  if (!matchPattern) return null;
+
+  const { pattern } = matchPattern;
+
+  if (pattern.size >= 5) {
     return SPECIAL_TILES.RAINBOW;
   }
 
-  if (matchedTiles.length === 4) {
-    // Check if it's a horizontal or vertical line
-    const xs = matchedTiles.map(t => t.x);
-    const ys = matchedTiles.map(t => t.y);
-    const uniqueXs = new Set(xs).size;
-    const uniqueYs = new Set(ys).size;
+  if (pattern.shape === 'line' && pattern.size === 4) {
+    return pattern.orientation === 'horizontal' ? SPECIAL_TILES.LINE_H : SPECIAL_TILES.LINE_V;
+  }
 
-    if (uniqueYs === 1) return SPECIAL_TILES.LINE_H; // Horizontal line
-    if (uniqueXs === 1) return SPECIAL_TILES.LINE_V; // Vertical line
-    return SPECIAL_TILES.BOMB; // L or T shape
+  if (pattern.shape === 'square' || pattern.shape === 'L' || pattern.shape === 'T' || pattern.shape === 'plus') {
+    return SPECIAL_TILES.BOMB;
   }
 
   return null; // Normal match, no special tile
@@ -525,110 +525,174 @@ export function createGridMap(tiles) {
 }
 
 /**
- * Find all 3+ in-a-row matches (horizontal and vertical)
- * Returns array of tile IDs that are part of matches
+ * Classify the geometric pattern for a connected match cluster
  */
-export function findAllMatches(tiles, gridSize) {
-  const grid = createGridMap(tiles);
-  const matchedIds = new Set();
+export function classifyMatchShape(matchTiles) {
+  const xs = matchTiles.map(t => t.x);
+  const ys = matchTiles.map(t => t.y);
+  const uniqueXs = new Set(xs);
+  const uniqueYs = new Set(ys);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const size = matchTiles.length;
 
-  // Check horizontal matches
-  for (let y = 0; y < gridSize; y++) {
-    let runType = null;
-    let runTiles = [];
+  const positions = new Set(matchTiles.map(t => `${t.x},${t.y}`));
 
-    for (let x = 0; x <= gridSize; x++) {
-      const tile = grid[`${x},${y}`];
-      const tileType = tile ? tile.type : null;
+  const isLine = uniqueXs.size === 1 || uniqueYs.size === 1;
+  if (isLine) {
+    return {
+      shape: 'line',
+      orientation: uniqueYs.size === 1 ? 'horizontal' : 'vertical',
+      size,
+    };
+  }
 
-      if (tileType && tileType === runType) {
-        runTiles.push(tile);
-      } else {
-        // End of run - check if it's a match (3+)
-        if (runTiles.length >= 3) {
-          runTiles.forEach(t => matchedIds.add(t.id));
-        }
-        // Start new run
-        runType = tileType;
-        runTiles = tile ? [tile] : [];
+  if (size === 4 && uniqueXs.size === 2 && uniqueYs.size === 2) {
+    const squarePositions = [
+      `${minX},${minY}`,
+      `${minX},${maxY}`,
+      `${maxX},${minY}`,
+      `${maxX},${maxY}`,
+    ];
+    if (squarePositions.every(p => positions.has(p))) {
+      return { shape: 'square', orientation: null, size };
+    }
+  }
+
+  const hasPosition = (x, y) => positions.has(`${x},${y}`);
+
+  // Detect plus shapes (center with all four arms)
+  for (const tile of matchTiles) {
+    const centerX = tile.x;
+    const centerY = tile.y;
+
+    let left = 0; let right = 0; let up = 0; let down = 0;
+    while (hasPosition(centerX - left - 1, centerY)) left++;
+    while (hasPosition(centerX + right + 1, centerY)) right++;
+    while (hasPosition(centerX, centerY - up - 1)) up++;
+    while (hasPosition(centerX, centerY + down + 1)) down++;
+
+    if (left > 0 && right > 0 && up > 0 && down > 0) {
+      const expectedSize = left + right + up + down + 1;
+      if (expectedSize === size && matchTiles.every(t => t.x === centerX || t.y === centerY)) {
+        return { shape: 'plus', orientation: null, size };
       }
     }
   }
 
-  // Check vertical matches
-  for (let x = 0; x < gridSize; x++) {
-    let runType = null;
-    let runTiles = [];
+  // Detect T shapes (three arms)
+  for (const tile of matchTiles) {
+    const centerX = tile.x;
+    const centerY = tile.y;
 
-    for (let y = 0; y <= gridSize; y++) {
-      const tile = grid[`${x},${y}`];
-      const tileType = tile ? tile.type : null;
+    let left = 0; let right = 0; let up = 0; let down = 0;
+    while (hasPosition(centerX - left - 1, centerY)) left++;
+    while (hasPosition(centerX + right + 1, centerY)) right++;
+    while (hasPosition(centerX, centerY - up - 1)) up++;
+    while (hasPosition(centerX, centerY + down + 1)) down++;
 
-      if (tileType && tileType === runType) {
-        runTiles.push(tile);
-      } else {
-        // End of run - check if it's a match (3+)
-        if (runTiles.length >= 3) {
-          runTiles.forEach(t => matchedIds.add(t.id));
-        }
-        // Start new run
-        runType = tileType;
-        runTiles = tile ? [tile] : [];
-      }
+    const arms = { left, right, up, down };
+    const armDirections = Object.entries(arms).filter(([, len]) => len > 0).map(([dir]) => dir);
+    const expectedSize = left + right + up + down + 1;
+
+    if (armDirections.length === 3 && expectedSize === size && matchTiles.every(t => t.x === centerX || t.y === centerY)) {
+      const missingArm = ['left', 'right', 'up', 'down'].find(dir => !armDirections.includes(dir));
+      return { shape: 'T', orientation: missingArm, size };
     }
   }
 
-  return Array.from(matchedIds);
+  // Detect L shapes (two perpendicular arms)
+  const corners = [
+    { x: minX, y: minY },
+    { x: minX, y: maxY },
+    { x: maxX, y: minY },
+    { x: maxX, y: maxY },
+  ];
+
+  for (const corner of corners) {
+    let horizontal = 0;
+    let vertical = 0;
+
+    while (hasPosition(corner.x + horizontal, corner.y)) horizontal++;
+    while (hasPosition(corner.x, corner.y + vertical)) vertical++;
+
+    if (horizontal > 1 && vertical > 1 && horizontal + vertical - 1 === size) {
+      const orientation = `${corner.x === minX ? 'left' : 'right'}-${corner.y === minY ? 'up' : 'down'}`;
+      return { shape: 'L', orientation, size };
+    }
+  }
+
+  return { shape: 'cluster', orientation: null, size };
 }
 
 /**
- * Find tiles that are part of a match containing the given tile
+ * Find all match clusters (3+) with pattern metadata
+ */
+export function findMatchPatterns(tiles, gridSize) {
+  const grid = createGridMap(tiles);
+  const visited = new Set();
+  const matches = [];
+
+  const directions = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ];
+
+  for (const tile of tiles) {
+    const key = `${tile.x},${tile.y}`;
+    if (visited.has(key)) continue;
+
+    // BFS to collect connected tiles of the same type
+    const queue = [tile];
+    const cluster = [];
+    visited.add(key);
+
+    while (queue.length > 0) {
+      const current = queue.shift();
+      cluster.push(current);
+
+      for (const [dx, dy] of directions) {
+        const nx = current.x + dx;
+        const ny = current.y + dy;
+        if (nx < 0 || ny < 0 || nx >= gridSize || ny >= gridSize) continue;
+        const neighborKey = `${nx},${ny}`;
+        const neighbor = grid[neighborKey];
+
+        if (neighbor && neighbor.type === tile.type && !visited.has(neighborKey)) {
+          visited.add(neighborKey);
+          queue.push(neighbor);
+        }
+      }
+    }
+
+    if (cluster.length >= 3) {
+      const pattern = classifyMatchShape(cluster);
+      matches.push({ ids: cluster.map(t => t.id), tiles: cluster, pattern });
+    }
+  }
+
+  return matches;
+}
+
+/**
+ * Find all 3+ connected matches regardless of geometry
+ * Returns array of pattern objects with ids, tiles, and pattern metadata
+ */
+export function findAllMatches(tiles, gridSize) {
+  return findMatchPatterns(tiles, gridSize);
+}
+
+/**
+ * Find the match pattern that includes a given tile (if any)
  * Used when a swap is made to find what matches were created
  */
 export function findMatchingGroup(tiles, tileId, gridSize) {
-  const tile = tiles.find(t => t.id === tileId);
-  if (!tile) return [];
-
-  const grid = createGridMap(tiles);
-  const matchedIds = new Set();
-
-  // Check horizontal match through this tile
-  let horzTiles = [tile];
-  // Look left
-  for (let x = tile.x - 1; x >= 0; x--) {
-    const t = grid[`${x},${tile.y}`];
-    if (t && t.type === tile.type) horzTiles.unshift(t);
-    else break;
-  }
-  // Look right
-  for (let x = tile.x + 1; x < gridSize; x++) {
-    const t = grid[`${x},${tile.y}`];
-    if (t && t.type === tile.type) horzTiles.push(t);
-    else break;
-  }
-  if (horzTiles.length >= 3) {
-    horzTiles.forEach(t => matchedIds.add(t.id));
-  }
-
-  // Check vertical match through this tile
-  let vertTiles = [tile];
-  // Look up
-  for (let y = tile.y - 1; y >= 0; y--) {
-    const t = grid[`${tile.x},${y}`];
-    if (t && t.type === tile.type) vertTiles.unshift(t);
-    else break;
-  }
-  // Look down
-  for (let y = tile.y + 1; y < gridSize; y++) {
-    const t = grid[`${tile.x},${y}`];
-    if (t && t.type === tile.type) vertTiles.push(t);
-    else break;
-  }
-  if (vertTiles.length >= 3) {
-    vertTiles.forEach(t => matchedIds.add(t.id));
-  }
-
-  return Array.from(matchedIds);
+  const patterns = findMatchPatterns(tiles, gridSize);
+  return patterns.find(pattern => pattern.ids.includes(tileId)) || null;
 }
 
 /**
@@ -646,7 +710,7 @@ export function wouldSwapCreateMatch(tiles, tile1, tile2, gridSize) {
   const matches1 = findMatchingGroup(swappedTiles, tile1.id, gridSize);
   const matches2 = findMatchingGroup(swappedTiles, tile2.id, gridSize);
 
-  return matches1.length > 0 || matches2.length > 0;
+  return Boolean(matches1) || Boolean(matches2);
 }
 
 /**
@@ -679,7 +743,7 @@ export function findValidMoves(tiles, gridSize) {
  * For highlighting purposes
  */
 export function findClearableTiles(tiles, gridSize) {
-  return findAllMatches(tiles, gridSize);
+  return findAllMatches(tiles, gridSize).flatMap(match => match.ids);
 }
 
 /**
@@ -786,9 +850,9 @@ export function generateInitialBoard(gridSize, tileCount) {
       // Check if this would create a match
       const testTile = { id: idCounter, x: pos.x, y: pos.y, type };
       const testTiles = [...tiles, testTile];
-      const matches = findMatchingGroup(testTiles, idCounter, gridSize);
+      const match = findMatchingGroup(testTiles, idCounter, gridSize);
 
-      if (matches.length === 0 || attempts > 20) break;
+      if (!match || attempts > 20) break;
     } while (attempts <= 20);
 
     tiles.push({ id: idCounter++, x: pos.x, y: pos.y, type });
@@ -940,7 +1004,7 @@ export function applyGravity(tiles, gridSize, getNextTileId = null) {
  * @param {Array} initialTiles - Starting tiles
  * @param {Array} tilesToClear - Tiles to clear in first step
  * @param {number} gridSize - Size of grid
- * @returns {Array} - Array of cascade steps: [{ clearedIds, newTiles, fallAnimations, newMatches }]
+ * @returns {Array} - Array of cascade steps: [{ clearedIds, newTiles, fallAnimations, newMatches, matchPatterns }]
  */
 export function processCascade(initialTiles, tilesToClear, gridSize) {
   const cascadeSteps = [];
@@ -955,7 +1019,8 @@ export function processCascade(initialTiles, tilesToClear, gridSize) {
     const { newTiles, fallAnimations } = applyGravity(remainingTiles, gridSize);
 
     // Step 3: Find new matches (cascade)
-    const newMatches = findAllMatches(newTiles, gridSize);
+    const matchPatterns = findAllMatches(newTiles, gridSize);
+    const newMatches = matchPatterns.flatMap(match => match.ids);
 
     // Record this cascade step
     cascadeSteps.push({
@@ -964,6 +1029,7 @@ export function processCascade(initialTiles, tilesToClear, gridSize) {
       tilesAfterFall: newTiles,
       fallAnimations,
       newMatches,
+      matchPatterns,
     });
 
     // Prepare for next iteration
