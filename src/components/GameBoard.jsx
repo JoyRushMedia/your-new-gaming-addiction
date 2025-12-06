@@ -1571,7 +1571,7 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
                   <>
                     <div className="text-impact text-3xl md:text-4xl text-neon-amber mb-2"
                       style={{ textShadow: '0 0 40px #ffb000' }}>
-                      TIME'S UP!
+                      TIME&apos;S UP!
                     </div>
                     {score > timedHighScore && timedHighScore > 0 ? (
                       <div className="text-lg text-yellow-400 mb-4 font-rajdhani animate-pulse">
@@ -1718,7 +1718,7 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
               ))}
             </div>
 
-            {/* Tiles - Absolutely positioned for smooth animation */}
+            {/* Tiles - Absolutely positioned with CSS transforms for 60fps */}
             <div
               className="relative"
               style={{
@@ -1726,24 +1726,22 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
                 height: gridPixelSize,
               }}
             >
-              <AnimatePresence mode="popLayout">
-                {tiles.map(tile => (
-                  <Tile
-                    key={tile.id}
-                    tile={tile}
-                    onClear={handleTileClear}
-                    onSwap={handleSwap}
-                    onSelect={handleTileSelect}
-                    isClearable={clearableTileIds.includes(tile.id)}
-                    isSelected={selectedTileId === tile.id}
-                    cellSize={cellSize}
-                    gridGap={4}
-                    isNew={newTileIds.has(tile.id)}
-                    isSwapping={swappingTileIds.has(tile.id)}
-                    isHinted={hintTileIds.has(tile.id)}
-                  />
-                ))}
-              </AnimatePresence>
+              {tiles.map(tile => (
+                <Tile
+                  key={tile.id}
+                  tile={tile}
+                  onClear={handleTileClear}
+                  onSwap={handleSwap}
+                  onSelect={handleTileSelect}
+                  isClearable={clearableTileIds.includes(tile.id)}
+                  isSelected={selectedTileId === tile.id}
+                  cellSize={cellSize}
+                  gridGap={4}
+                  isNew={newTileIds.has(tile.id)}
+                  isSwapping={swappingTileIds.has(tile.id)}
+                  isHinted={hintTileIds.has(tile.id)}
+                />
+              ))}
             </div>
 
             {/* No Moves Overlay */}

@@ -1,9 +1,8 @@
-import { memo, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
+import { memo, useRef, useState, useEffect } from 'react';
 
 /**
- * Tile Component - SWAP & MATCH-3 STYLE
- * Features: Spring-animated positions, swipe to swap, responsive interactions
+ * Tile Component - HIGH PERFORMANCE CSS VERSION
+ * Uses CSS transforms instead of Framer Motion springs for 60fps animations
  */
 
 // Enhanced tile configurations with icons and gradients
@@ -178,20 +177,6 @@ const TileIcon = ({ type, color, size = 28 }) => {
   return icons[type] || icons.bolt;
 };
 
-// Snappy spring physics for responsive feel
-const POSITION_SPRING = {
-  type: 'spring',
-  stiffness: 700,
-  damping: 35,
-  mass: 0.8,
-};
-
-const SCALE_SPRING = {
-  type: 'spring',
-  stiffness: 500,
-  damping: 25,
-};
-
 function Tile({
   tile,
   onClear,
@@ -207,7 +192,19 @@ function Tile({
 }) {
   const [isHovered, setIsHovered] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [isPressed, setIsPressed] = useState(false);
+  const [hasEntered, setHasEntered] = useState(!isNew);
   const dragStartRef = useRef({ x: 0, y: 0 });
+
+  // Handle new tile entrance animation
+  useEffect(() => {
+    if (isNew && !hasEntered) {
+      // Small delay for staggered effect based on position
+      const delay = (tile.x + tile.y) * 15;
+      const timer = setTimeout(() => setHasEntered(true), delay);
+      return () => clearTimeout(timer);
+    }
+  }, [isNew, hasEntered, tile.x, tile.y]);
 
   // Use special config if tile is special, otherwise use regular config
   const isSpecial = tile.special && SPECIAL_CONFIG[tile.special];
@@ -249,6 +246,7 @@ function Tile({
   const handleMouseDown = (e) => {
     e.preventDefault();
     setIsDragging(false);
+    setIsPressed(true);
     dragStartRef.current = { x: e.clientX, y: e.clientY };
 
     const handleMouseMove = (moveEvent) => {
@@ -261,6 +259,7 @@ function Tile({
     };
 
     const handleMouseUp = (upEvent) => {
+      setIsPressed(false);
       const deltaX = upEvent.clientX - dragStartRef.current.x;
       const deltaY = upEvent.clientY - dragStartRef.current.y;
       const direction = getSwipeDirection(deltaX, deltaY);
@@ -283,6 +282,7 @@ function Tile({
   const handleTouchStart = (e) => {
     const touch = e.touches[0];
     setIsDragging(false);
+    setIsPressed(true);
     dragStartRef.current = { x: touch.clientX, y: touch.clientY };
   };
 
@@ -298,6 +298,7 @@ function Tile({
   };
 
   const handleTouchEnd = (e) => {
+    setIsPressed(false);
     const touch = e.changedTouches[0];
     const deltaX = touch.clientX - dragStartRef.current.x;
     const deltaY = touch.clientY - dragStartRef.current.y;
@@ -312,30 +313,56 @@ function Tile({
     setTimeout(() => setIsDragging(false), 30);
   };
 
+  // Calculate scale based on state
+  const getScale = () => {
+    if (!hasEntered) return 0;
+    if (isPressed) return 0.92;
+    if (isHovered) return 1.08;
+    if (isSwapping) return 1.05;
+    return 1;
+  };
+
+  // Container styles - GPU accelerated
+  const containerStyle = {
+    position: 'absolute',
+    width: cellSize,
+    height: cellSize,
+    // GPU acceleration: use translate3d and will-change
+    transform: `translate3d(${pixelX}px, ${pixelY}px, 0) scale(${getScale()})`,
+    opacity: hasEntered ? 1 : 0,
+    // Fast CSS transitions instead of spring physics
+    transition: hasEntered
+      ? 'transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.15s ease-out'
+      : 'transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.2s ease-out',
+    zIndex: isSwapping ? 10 : 1,
+    cursor: 'pointer',
+    userSelect: 'none',
+    // GPU layer hints
+    willChange: 'transform, opacity',
+    backfaceVisibility: 'hidden',
+    WebkitBackfaceVisibility: 'hidden',
+  };
+
+  // Inner tile body style
+  const tileBodyStyle = {
+    width: '100%',
+    height: '100%',
+    position: 'relative',
+    overflow: 'hidden',
+    borderRadius: '8px',
+    background: config.bgGradient,
+    border: `2px solid ${config.borderColor}`,
+    boxShadow: isClearable
+      ? `0 0 ${isHovered ? '25px' : '15px'} ${config.glowColor}, ${config.shadowInner || ''}, 0 4px 8px rgba(0,0,0,0.4)`
+      : `0 0 8px ${config.glowColor}40, ${config.shadowInner || ''}, 0 2px 4px rgba(0,0,0,0.3)`,
+    // GPU acceleration for box-shadow changes
+    transition: 'box-shadow 0.1s ease-out',
+  };
+
   return (
-    <motion.div
+    <div
       data-tile-id={tile.id}
-      className="absolute cursor-pointer select-none"
-      style={{
-        width: cellSize,
-        height: cellSize,
-        zIndex: isSwapping ? 10 : 1,
-      }}
-      initial={isNew ? { x: pixelX, y: pixelY, scale: 0, opacity: 0 } : { x: pixelX, y: pixelY }}
-      animate={{
-        x: pixelX,
-        y: pixelY,
-        scale: 1,
-        opacity: 1,
-      }}
-      exit={{
-        scale: 0,
-        opacity: 0,
-        transition: { duration: 0.15 },
-      }}
-      transition={POSITION_SPRING}
-      whileHover={{ scale: 1.08, transition: { duration: 0.1 } }}
-      whileTap={{ scale: 0.92, transition: { duration: 0.05 } }}
+      style={containerStyle}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onClick={handleClick}
@@ -345,42 +372,47 @@ function Tile({
       onTouchEnd={handleTouchEnd}
     >
       {/* Main tile body */}
-      <motion.div
-        className="w-full h-full relative overflow-hidden rounded-lg"
-        style={{
-          background: config.bgGradient,
-          border: `2px solid ${config.borderColor}`,
-          boxShadow: isClearable
-            ? `0 0 ${isHovered ? '25px' : '15px'} ${config.glowColor}, ${config.shadowInner}, 0 4px 8px rgba(0,0,0,0.4)`
-            : `0 0 8px ${config.glowColor}40, ${config.shadowInner}, 0 2px 4px rgba(0,0,0,0.3)`,
-        }}
-        animate={{
-          scale: isSwapping ? 1.05 : 1,
-        }}
-        transition={SCALE_SPRING}
-      >
+      <div style={tileBodyStyle}>
         {/* Top shine effect */}
         <div
-          className="absolute inset-x-0 top-0 h-1/3 pointer-events-none"
           style={{
+            position: 'absolute',
+            inset: '0',
+            top: 0,
+            height: '33%',
             background: 'linear-gradient(to bottom, rgba(255,255,255,0.4) 0%, rgba(255,255,255,0) 100%)',
             borderRadius: '6px 6px 0 0',
+            pointerEvents: 'none',
           }}
         />
 
-        {/* Simple glow for clearable tiles - no animation */}
+        {/* Simple glow for clearable tiles */}
         {isClearable && (
           <div
-            className="absolute inset-0 pointer-events-none rounded-lg"
             style={{
+              position: 'absolute',
+              inset: 0,
+              borderRadius: '8px',
               background: `radial-gradient(circle at 50% 50%, ${config.glowColor}40 0%, transparent 60%)`,
+              pointerEvents: 'none',
             }}
           />
         )}
 
-        {/* Icon container - simplified animations for performance */}
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div style={{ transform: isHovered ? 'scale(1.1)' : 'scale(1)', transition: 'transform 0.1s' }}>
+        {/* Icon container */}
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <div style={{
+            transform: isHovered ? 'scale(1.1)' : 'scale(1)',
+            transition: 'transform 0.1s ease-out'
+          }}>
             {isSpecial ? (
               <SpecialIcon special={tile.special} size={iconSize} />
             ) : (
@@ -393,69 +425,93 @@ function Tile({
           </div>
         </div>
 
-        {/* Special tile indicator - static glow, no animation */}
+        {/* Special tile indicator */}
         {isSpecial && (
           <div
-            className="absolute inset-[-3px] pointer-events-none rounded-xl"
             style={{
+              position: 'absolute',
+              inset: '-3px',
+              borderRadius: '12px',
               border: `2px solid ${config.glowColor}`,
               boxShadow: `0 0 15px ${config.glowColor}`,
+              pointerEvents: 'none',
             }}
           />
         )}
 
         {/* Corner accents */}
         <div
-          className="absolute top-1 left-1 w-2 h-2 pointer-events-none"
           style={{
+            position: 'absolute',
+            top: '4px',
+            left: '4px',
+            width: '8px',
+            height: '8px',
             borderTop: '2px solid rgba(255,255,255,0.5)',
             borderLeft: '2px solid rgba(255,255,255,0.5)',
             borderRadius: '2px 0 0 0',
+            pointerEvents: 'none',
           }}
         />
         <div
-          className="absolute bottom-1 right-1 w-2 h-2 pointer-events-none"
           style={{
+            position: 'absolute',
+            bottom: '4px',
+            right: '4px',
+            width: '8px',
+            height: '8px',
             borderBottom: '2px solid rgba(0,0,0,0.3)',
             borderRight: '2px solid rgba(0,0,0,0.3)',
             borderRadius: '0 0 2px 0',
+            pointerEvents: 'none',
           }}
         />
 
-        {/* Clearable indicator ring - static */}
+        {/* Clearable indicator ring */}
         {isClearable && !isHinted && (
           <div
-            className="absolute inset-[-2px] pointer-events-none rounded-xl"
             style={{
+              position: 'absolute',
+              inset: '-2px',
+              borderRadius: '12px',
               border: `2px solid ${config.glowColor}`,
               opacity: 0.6,
+              pointerEvents: 'none',
             }}
           />
         )}
 
-        {/* Hint indicator - simple gold ring */}
+        {/* Hint indicator - gold ring */}
         {isHinted && (
           <div
-            className="absolute inset-[-3px] pointer-events-none rounded-xl"
             style={{
+              position: 'absolute',
+              inset: '-3px',
+              borderRadius: '12px',
               border: '3px solid #ffd700',
               boxShadow: '0 0 15px #ffd700',
+              pointerEvents: 'none',
+              animation: 'pulse 1s ease-in-out infinite',
             }}
           />
         )}
 
-        {/* Selection indicator - cyan pulsing ring for click-to-select */}
+        {/* Selection indicator - cyan pulsing ring */}
         {isSelected && (
           <div
-            className="absolute inset-[-4px] pointer-events-none rounded-xl animate-pulse"
             style={{
+              position: 'absolute',
+              inset: '-4px',
+              borderRadius: '12px',
               border: '3px solid #00f0ff',
               boxShadow: '0 0 20px #00f0ff, inset 0 0 10px rgba(0, 240, 255, 0.3)',
+              pointerEvents: 'none',
+              animation: 'pulse 0.8s ease-in-out infinite',
             }}
           />
         )}
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 }
 
