@@ -1,196 +1,35 @@
-import { memo, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
+import { memo, useRef, useState, useEffect } from 'react';
 
 /**
- * Tile Component - SWAP & MATCH-3 STYLE
- * Features: Spring-animated positions, swipe to swap, responsive interactions
+ * Tile Component - ULTRA HIGH PERFORMANCE VERSION
+ * Minimal DOM elements, simplified shadows, CSS-only animations
  */
 
-// Enhanced tile configurations with icons and gradients
-const TILE_CONFIG = {
-  cyan: {
-    name: 'Energy',
-    bgGradient: 'linear-gradient(135deg, #00f0ff 0%, #0080ff 50%, #00f0ff 100%)',
-    borderColor: '#00f0ff',
-    glowColor: '#00f0ff',
-    iconColor: '#001a1f',
-    shadowInner: 'inset 0 2px 4px rgba(255,255,255,0.4), inset 0 -2px 4px rgba(0,0,0,0.3)',
-    icon: 'bolt',
-  },
-  magenta: {
-    name: 'Plasma',
-    bgGradient: 'linear-gradient(135deg, #ff00ff 0%, #ff0080 50%, #ff00ff 100%)',
-    borderColor: '#ff00ff',
-    glowColor: '#ff00ff',
-    iconColor: '#1f001f',
-    shadowInner: 'inset 0 2px 4px rgba(255,255,255,0.4), inset 0 -2px 4px rgba(0,0,0,0.3)',
-    icon: 'hexagon',
-  },
-  amber: {
-    name: 'Core',
-    bgGradient: 'linear-gradient(135deg, #ffb000 0%, #ff6600 50%, #ffb000 100%)',
-    borderColor: '#ffb000',
-    glowColor: '#ffb000',
-    iconColor: '#1f1000',
-    shadowInner: 'inset 0 2px 4px rgba(255,255,255,0.4), inset 0 -2px 4px rgba(0,0,0,0.3)',
-    icon: 'diamond',
-  },
-  violet: {
-    name: 'Void',
-    bgGradient: 'linear-gradient(135deg, #a855f7 0%, #6b21a8 50%, #a855f7 100%)',
-    borderColor: '#a855f7',
-    glowColor: '#a855f7',
-    iconColor: '#0f0520',
-    shadowInner: 'inset 0 2px 4px rgba(255,255,255,0.4), inset 0 -2px 4px rgba(0,0,0,0.3)',
-    icon: 'star',
-  },
+// Tile type colors - simplified for performance
+const TILE_COLORS = {
+  cyan: { bg: '#00b8cc', border: '#00f0ff', glow: '#00f0ff', icon: '#001a1f' },
+  magenta: { bg: '#cc00cc', border: '#ff00ff', glow: '#ff00ff', icon: '#1f001f' },
+  amber: { bg: '#cc8800', border: '#ffb000', glow: '#ffb000', icon: '#1f1000' },
+  violet: { bg: '#8833cc', border: '#a855f7', glow: '#a855f7', icon: '#0f0520' },
 };
 
-// Special tile icons
-const SpecialIcon = ({ special, size = 28 }) => {
-  const icons = {
-    bomb: (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-        <circle cx="12" cy="14" r="8" fill="#1a1a1a" stroke="#ff6600" strokeWidth="2" />
-        <path d="M12 6V2M10 3h4" stroke="#ff6600" strokeWidth="2" strokeLinecap="round" />
-        <circle cx="9" cy="12" r="2" fill="rgba(255,255,255,0.3)" />
-        <path d="M14 4l2-2" stroke="#ffaa00" strokeWidth="2" strokeLinecap="round" />
-        <circle cx="16" cy="2" r="1" fill="#ffaa00" />
-      </svg>
-    ),
-    line_h: (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-        <rect x="2" y="10" width="20" height="4" rx="2" fill="#00f0ff" />
-        <path d="M2 12h20" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
-        <circle cx="4" cy="12" r="2" fill="#ffffff" />
-        <circle cx="20" cy="12" r="2" fill="#ffffff" />
-      </svg>
-    ),
-    line_v: (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-        <rect x="10" y="2" width="4" height="20" rx="2" fill="#00f0ff" />
-        <path d="M12 2v20" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
-        <circle cx="12" cy="4" r="2" fill="#ffffff" />
-        <circle cx="12" cy="20" r="2" fill="#ffffff" />
-      </svg>
-    ),
-    rainbow: (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-        <circle cx="12" cy="12" r="10" fill="url(#rainbowGrad)" />
-        <defs>
-          <linearGradient id="rainbowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#ff0000" />
-            <stop offset="25%" stopColor="#ffff00" />
-            <stop offset="50%" stopColor="#00ff00" />
-            <stop offset="75%" stopColor="#00ffff" />
-            <stop offset="100%" stopColor="#ff00ff" />
-          </linearGradient>
-        </defs>
-        <circle cx="12" cy="12" r="5" fill="#ffffff" opacity="0.5" />
-        <path d="M12 7l1.5 3 3.5.5-2.5 2.5.5 3.5-3-1.5-3 1.5.5-3.5L7 10.5l3.5-.5L12 7z" fill="#ffffff" />
-      </svg>
-    ),
-  };
-  return icons[special] || null;
+// Special tile colors
+const SPECIAL_COLORS = {
+  bomb: { bg: '#cc3300', border: '#ff6600', glow: '#ff6600' },
+  line_h: { bg: '#00cccc', border: '#00f0ff', glow: '#00f0ff' },
+  line_v: { bg: '#00cccc', border: '#00f0ff', glow: '#00f0ff' },
+  rainbow: { bg: '#888888', border: '#ffffff', glow: '#ffffff' },
 };
 
-// Special tile configurations
-const SPECIAL_CONFIG = {
-  bomb: {
-    bgGradient: 'radial-gradient(circle, #ff6600 0%, #cc3300 50%, #1a0a00 100%)',
-    borderColor: '#ff6600',
-    glowColor: '#ff6600',
-  },
-  line_h: {
-    bgGradient: 'linear-gradient(90deg, #00f0ff 0%, #ffffff 50%, #00f0ff 100%)',
-    borderColor: '#00f0ff',
-    glowColor: '#00f0ff',
-  },
-  line_v: {
-    bgGradient: 'linear-gradient(0deg, #00f0ff 0%, #ffffff 50%, #00f0ff 100%)',
-    borderColor: '#00f0ff',
-    glowColor: '#00f0ff',
-  },
-  rainbow: {
-    bgGradient: 'conic-gradient(from 0deg, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000)',
-    borderColor: '#ffffff',
-    glowColor: '#ffffff',
-  },
+// Lightweight SVG icons - inline paths only
+const ICONS = {
+  bolt: 'M13 2L4 14h7l-1 8 9-12h-7l1-8z',
+  hexagon: 'M12 2l8 4.5v9L12 20l-8-4.5v-9L12 2z',
+  diamond: 'M12 2l10 10-10 10L2 12 12 2z',
+  star: 'M12 2l2.4 7.4h7.6l-6 4.6 2.3 7.4L12 17l-6.3 4.4 2.3-7.4-6-4.6h7.6L12 2z',
 };
 
-// SVG Icons for each tile type
-const TileIcon = ({ type, color, size = 28 }) => {
-  const icons = {
-    bolt: (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-        <path
-          d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"
-          fill={color}
-          stroke={color}
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    ),
-    hexagon: (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-        <path
-          d="M12 2l8 4.5v9L12 20l-8-4.5v-9L12 2z"
-          fill={color}
-          stroke={color}
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <circle cx="12" cy="11" r="3" fill="rgba(255,255,255,0.3)" />
-      </svg>
-    ),
-    diamond: (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-        <path
-          d="M12 2l10 10-10 10L2 12 12 2z"
-          fill={color}
-          stroke={color}
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <path
-          d="M12 6l6 6-6 6-6-6 6-6z"
-          fill="rgba(255,255,255,0.2)"
-        />
-      </svg>
-    ),
-    star: (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-        <path
-          d="M12 2l2.4 7.4h7.6l-6 4.6 2.3 7.4L12 17l-6.3 4.4 2.3-7.4-6-4.6h7.6L12 2z"
-          fill={color}
-          stroke={color}
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    ),
-  };
-  return icons[type] || icons.bolt;
-};
-
-// Snappy spring physics for responsive feel
-const POSITION_SPRING = {
-  type: 'spring',
-  stiffness: 700,
-  damping: 35,
-  mass: 0.8,
-};
-
-const SCALE_SPRING = {
-  type: 'spring',
-  stiffness: 500,
-  damping: 25,
-};
+const ICON_MAP = { cyan: 'bolt', magenta: 'hexagon', amber: 'diamond', violet: 'star' };
 
 function Tile({
   tile,
@@ -207,70 +46,63 @@ function Tile({
 }) {
   const [isHovered, setIsHovered] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [isPressed, setIsPressed] = useState(false);
+  const [hasEntered, setHasEntered] = useState(!isNew);
   const dragStartRef = useRef({ x: 0, y: 0 });
 
-  // Use special config if tile is special, otherwise use regular config
-  const isSpecial = tile.special && SPECIAL_CONFIG[tile.special];
-  const config = isSpecial ? SPECIAL_CONFIG[tile.special] : (TILE_CONFIG[tile.type] || TILE_CONFIG.cyan);
-  const regularConfig = TILE_CONFIG[tile.type] || TILE_CONFIG.cyan;
-  const iconSize = Math.max(24, cellSize * 0.5);
+  // Staggered entrance for new tiles
+  useEffect(() => {
+    if (isNew && !hasEntered) {
+      const delay = (tile.x + tile.y) * 12;
+      const timer = setTimeout(() => setHasEntered(true), delay);
+      return () => clearTimeout(timer);
+    }
+  }, [isNew, hasEntered, tile.x, tile.y]);
 
-  // Calculate pixel position from grid coordinates
+  const isSpecial = tile.special && SPECIAL_COLORS[tile.special];
+  const colors = isSpecial ? SPECIAL_COLORS[tile.special] : (TILE_COLORS[tile.type] || TILE_COLORS.cyan);
+  const iconPath = ICONS[ICON_MAP[tile.type] || 'bolt'];
+  const iconSize = Math.max(22, cellSize * 0.45);
+
+  // Position
   const pixelX = tile.x * (cellSize + gridGap);
   const pixelY = tile.y * (cellSize + gridGap);
 
-  // Handle click/tap - use onSelect for click-to-select swap, or clear if clearable
+  // Click handler
   const handleClick = () => {
     if (isDragging) return;
-    // Prefer onSelect for unified click handling (supports click-to-swap)
-    if (onSelect) {
-      onSelect(tile);
-    } else if (isClearable) {
-      onClear(tile.id);
-    }
+    if (onSelect) onSelect(tile);
+    else if (isClearable) onClear(tile.id);
   };
 
-  // Get swipe direction from delta
+  // Swipe detection
   const getSwipeDirection = (deltaX, deltaY) => {
     const threshold = cellSize * 0.25;
-    const absX = Math.abs(deltaX);
-    const absY = Math.abs(deltaY);
-
-    if (absX < threshold && absY < threshold) return null;
-
-    if (absX > absY) {
-      return deltaX > 0 ? 'right' : 'left';
-    } else {
-      return deltaY > 0 ? 'down' : 'up';
-    }
+    if (Math.abs(deltaX) < threshold && Math.abs(deltaY) < threshold) return null;
+    return Math.abs(deltaX) > Math.abs(deltaY)
+      ? (deltaX > 0 ? 'right' : 'left')
+      : (deltaY > 0 ? 'down' : 'up');
   };
 
-  // Mouse/Trackpad drag handlers
   const handleMouseDown = (e) => {
     e.preventDefault();
     setIsDragging(false);
+    setIsPressed(true);
     dragStartRef.current = { x: e.clientX, y: e.clientY };
 
     const handleMouseMove = (moveEvent) => {
       const deltaX = moveEvent.clientX - dragStartRef.current.x;
       const deltaY = moveEvent.clientY - dragStartRef.current.y;
-
-      if (Math.abs(deltaX) > 8 || Math.abs(deltaY) > 8) {
-        setIsDragging(true);
-      }
+      if (Math.abs(deltaX) > 8 || Math.abs(deltaY) > 8) setIsDragging(true);
     };
 
     const handleMouseUp = (upEvent) => {
+      setIsPressed(false);
       const deltaX = upEvent.clientX - dragStartRef.current.x;
       const deltaY = upEvent.clientY - dragStartRef.current.y;
       const direction = getSwipeDirection(deltaX, deltaY);
-
-      if (direction && onSwap) {
-        onSwap(tile, direction);
-      }
-
+      if (direction && onSwap) onSwap(tile, direction);
       setTimeout(() => setIsDragging(false), 30);
-
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
@@ -279,10 +111,10 @@ function Tile({
     window.addEventListener('mouseup', handleMouseUp);
   };
 
-  // Touch drag handlers
   const handleTouchStart = (e) => {
     const touch = e.touches[0];
     setIsDragging(false);
+    setIsPressed(true);
     dragStartRef.current = { x: touch.clientX, y: touch.clientY };
   };
 
@@ -291,51 +123,63 @@ function Tile({
     const touch = e.touches[0];
     const deltaX = touch.clientX - dragStartRef.current.x;
     const deltaY = touch.clientY - dragStartRef.current.y;
-
-    if (Math.abs(deltaX) > 8 || Math.abs(deltaY) > 8) {
-      setIsDragging(true);
-    }
+    if (Math.abs(deltaX) > 8 || Math.abs(deltaY) > 8) setIsDragging(true);
   };
 
   const handleTouchEnd = (e) => {
+    setIsPressed(false);
     const touch = e.changedTouches[0];
     const deltaX = touch.clientX - dragStartRef.current.x;
     const deltaY = touch.clientY - dragStartRef.current.y;
     const direction = getSwipeDirection(deltaX, deltaY);
-
-    if (direction && onSwap) {
-      onSwap(tile, direction);
-    } else if (!isDragging && isClearable) {
-      onClear(tile.id);
-    }
-
+    if (direction && onSwap) onSwap(tile, direction);
+    else if (!isDragging && isClearable) onClear(tile.id);
     setTimeout(() => setIsDragging(false), 30);
   };
 
+  // Calculate scale
+  const scale = !hasEntered ? 0 : isPressed ? 0.92 : isHovered ? 1.06 : isSwapping ? 1.04 : 1;
+
+  // Build box-shadow - single string instead of multiple elements
+  let shadow = `inset 0 2px 3px rgba(255,255,255,0.35), inset 0 -2px 3px rgba(0,0,0,0.25)`;
+  if (isClearable || isHovered) {
+    shadow += `, 0 0 ${isHovered ? '18px' : '12px'} ${colors.glow}`;
+  }
+  if (isSelected) {
+    shadow += `, 0 0 20px #00f0ff, 0 0 30px #00f0ff`;
+  } else if (isHinted) {
+    shadow += `, 0 0 18px #ffd700, 0 0 25px #ffd700`;
+  }
+
+  // Border color based on state
+  const borderColor = isSelected ? '#00f0ff' : isHinted ? '#ffd700' : colors.border;
+  const borderWidth = isSelected || isHinted ? 3 : 2;
+
   return (
-    <motion.div
+    <div
       data-tile-id={tile.id}
-      className="absolute cursor-pointer select-none"
       style={{
+        position: 'absolute',
         width: cellSize,
         height: cellSize,
-        zIndex: isSwapping ? 10 : 1,
+        transform: `translate3d(${pixelX}px, ${pixelY}px, 0) scale(${scale})`,
+        opacity: hasEntered ? 1 : 0,
+        transition: hasEntered
+          ? 'transform 0.12s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.1s'
+          : 'transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.18s',
+        zIndex: isSwapping || isSelected ? 10 : 1,
+        cursor: 'pointer',
+        willChange: 'transform',
+        backfaceVisibility: 'hidden',
+        // Main tile styling - all in one element
+        background: `linear-gradient(135deg, ${colors.bg} 0%, ${colors.border} 100%)`,
+        border: `${borderWidth}px solid ${borderColor}`,
+        borderRadius: '8px',
+        boxShadow: shadow,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
       }}
-      initial={isNew ? { x: pixelX, y: pixelY, scale: 0, opacity: 0 } : { x: pixelX, y: pixelY }}
-      animate={{
-        x: pixelX,
-        y: pixelY,
-        scale: 1,
-        opacity: 1,
-      }}
-      exit={{
-        scale: 0,
-        opacity: 0,
-        transition: { duration: 0.15 },
-      }}
-      transition={POSITION_SPRING}
-      whileHover={{ scale: 1.08, transition: { duration: 0.1 } }}
-      whileTap={{ scale: 0.92, transition: { duration: 0.05 } }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onClick={handleClick}
@@ -344,139 +188,53 @@ function Tile({
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
-      {/* Main tile body */}
-      <motion.div
-        className="w-full h-full relative overflow-hidden rounded-lg"
-        style={{
-          background: config.bgGradient,
-          border: `2px solid ${config.borderColor}`,
-          boxShadow: isClearable
-            ? `0 0 ${isHovered ? '25px' : '15px'} ${config.glowColor}, ${config.shadowInner}, 0 4px 8px rgba(0,0,0,0.4)`
-            : `0 0 8px ${config.glowColor}40, ${config.shadowInner}, 0 2px 4px rgba(0,0,0,0.3)`,
-        }}
-        animate={{
-          scale: isSwapping ? 1.05 : 1,
-        }}
-        transition={SCALE_SPRING}
-      >
-        {/* Top shine effect */}
-        <div
-          className="absolute inset-x-0 top-0 h-1/3 pointer-events-none"
-          style={{
-            background: 'linear-gradient(to bottom, rgba(255,255,255,0.4) 0%, rgba(255,255,255,0) 100%)',
-            borderRadius: '6px 6px 0 0',
-          }}
-        />
-
-        {/* Simple glow for clearable tiles - no animation */}
-        {isClearable && (
-          <div
-            className="absolute inset-0 pointer-events-none rounded-lg"
-            style={{
-              background: `radial-gradient(circle at 50% 50%, ${config.glowColor}40 0%, transparent 60%)`,
-            }}
+      {/* Single SVG icon - no wrapper divs */}
+      {!isSpecial && (
+        <svg
+          width={iconSize}
+          height={iconSize}
+          viewBox="0 0 24 24"
+          fill={colors.icon}
+          style={{ pointerEvents: 'none' }}
+        >
+          <path d={iconPath} />
+        </svg>
+      )}
+      {isSpecial && tile.special === 'bomb' && (
+        <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" style={{ pointerEvents: 'none' }}>
+          <circle cx="12" cy="14" r="7" fill="#1a1a1a" stroke="#ff6600" strokeWidth="2" />
+          <path d="M12 7V3M14 4l2-2" stroke="#ff6600" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      )}
+      {isSpecial && (tile.special === 'line_h' || tile.special === 'line_v') && (
+        <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" style={{ pointerEvents: 'none' }}>
+          <path
+            d={tile.special === 'line_h' ? 'M2 12h20' : 'M12 2v20'}
+            stroke="#ffffff"
+            strokeWidth="3"
+            strokeLinecap="round"
           />
-        )}
-
-        {/* Icon container - simplified animations for performance */}
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div style={{ transform: isHovered ? 'scale(1.1)' : 'scale(1)', transition: 'transform 0.1s' }}>
-            {isSpecial ? (
-              <SpecialIcon special={tile.special} size={iconSize} />
-            ) : (
-              <TileIcon
-                type={regularConfig.icon}
-                color={regularConfig.iconColor}
-                size={iconSize}
-              />
-            )}
-          </div>
-        </div>
-
-        {/* Special tile indicator - static glow, no animation */}
-        {isSpecial && (
-          <div
-            className="absolute inset-[-3px] pointer-events-none rounded-xl"
-            style={{
-              border: `2px solid ${config.glowColor}`,
-              boxShadow: `0 0 15px ${config.glowColor}`,
-            }}
-          />
-        )}
-
-        {/* Corner accents */}
-        <div
-          className="absolute top-1 left-1 w-2 h-2 pointer-events-none"
-          style={{
-            borderTop: '2px solid rgba(255,255,255,0.5)',
-            borderLeft: '2px solid rgba(255,255,255,0.5)',
-            borderRadius: '2px 0 0 0',
-          }}
-        />
-        <div
-          className="absolute bottom-1 right-1 w-2 h-2 pointer-events-none"
-          style={{
-            borderBottom: '2px solid rgba(0,0,0,0.3)',
-            borderRight: '2px solid rgba(0,0,0,0.3)',
-            borderRadius: '0 0 2px 0',
-          }}
-        />
-
-        {/* Clearable indicator ring - static */}
-        {isClearable && !isHinted && (
-          <div
-            className="absolute inset-[-2px] pointer-events-none rounded-xl"
-            style={{
-              border: `2px solid ${config.glowColor}`,
-              opacity: 0.6,
-            }}
-          />
-        )}
-
-        {/* Hint indicator - simple gold ring */}
-        {isHinted && (
-          <div
-            className="absolute inset-[-3px] pointer-events-none rounded-xl"
-            style={{
-              border: '3px solid #ffd700',
-              boxShadow: '0 0 15px #ffd700',
-            }}
-          />
-        )}
-
-        {/* Selection indicator - cyan pulsing ring for click-to-select */}
-        {isSelected && (
-          <div
-            className="absolute inset-[-4px] pointer-events-none rounded-xl animate-pulse"
-            style={{
-              border: '3px solid #00f0ff',
-              boxShadow: '0 0 20px #00f0ff, inset 0 0 10px rgba(0, 240, 255, 0.3)',
-            }}
-          />
-        )}
-      </motion.div>
-    </motion.div>
+        </svg>
+      )}
+      {isSpecial && tile.special === 'rainbow' && (
+        <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" style={{ pointerEvents: 'none' }}>
+          <path d="M12 2l2.4 7.4h7.6l-6 4.6 2.3 7.4L12 17l-6.3 4.4 2.3-7.4-6-4.6h7.6L12 2z" fill="#ffd700" />
+        </svg>
+      )}
+    </div>
   );
 }
 
 const propsAreEqual = (prev, next) => {
-  if (prev.cellSize !== next.cellSize || prev.gridGap !== next.gridGap) return false;
+  if (prev.cellSize !== next.cellSize) return false;
   if (prev.isClearable !== next.isClearable) return false;
   if (prev.isNew !== next.isNew) return false;
   if (prev.isSwapping !== next.isSwapping) return false;
   if (prev.isHinted !== next.isHinted) return false;
   if (prev.isSelected !== next.isSelected) return false;
 
-  const prevTile = prev.tile;
-  const nextTile = next.tile;
-
-  return (
-    prevTile.id === nextTile.id &&
-    prevTile.x === nextTile.x &&
-    prevTile.y === nextTile.y &&
-    prevTile.type === nextTile.type &&
-    prevTile.special === nextTile.special
-  );
+  const p = prev.tile, n = next.tile;
+  return p.id === n.id && p.x === n.x && p.y === n.y && p.type === n.type && p.special === n.special;
 };
 
 export default memo(Tile, propsAreEqual);

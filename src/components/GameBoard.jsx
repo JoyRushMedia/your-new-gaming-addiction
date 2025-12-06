@@ -186,10 +186,10 @@ export default function GameBoard({
   // MEMOIZED COMPUTATIONS
   // ============================================
 
-  // Find existing matches (for auto-clear after cascades)
-  const clearableTileIds = useMemo(() => {
-    if (gamePhase !== GAME_PHASE.IDLE) return [];
-    return findClearableTiles(tiles, GRID_SIZE);
+  // Find existing matches (for auto-clear after cascades) - use Set for O(1) lookups
+  const clearableTileIdSet = useMemo(() => {
+    if (gamePhase !== GAME_PHASE.IDLE) return new Set();
+    return new Set(findClearableTiles(tiles, GRID_SIZE));
   }, [tiles, gamePhase]);
 
   // Find valid swap moves
@@ -212,10 +212,10 @@ export default function GameBoard({
   const hasNoMoves = useMemo(() => {
     return (
       validMoves.length === 0 &&
-      clearableTileIds.length === 0 &&
+      clearableTileIdSet.size === 0 &&
       tiles.length >= GRID_SIZE * GRID_SIZE
     );
-  }, [validMoves.length, clearableTileIds.length, tiles.length]);
+  }, [validMoves.length, clearableTileIdSet.size, tiles.length]);
 
   // Show hint - highlight a random valid move
   const showHint = useCallback(() => {
@@ -1066,7 +1066,7 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
     // If no tile selected, select this one
     if (selectedTileId === null) {
       // First check if the tile is clearable - if so, clear it instead of selecting
-      if (clearableTileIds.includes(tile.id)) {
+      if (clearableTileIdSet.has(tile.id)) {
         handleTileClear(tile.id);
         return;
       }
@@ -1097,14 +1097,14 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
       handleSwap(selectedTile, direction);
     } else {
       // Not adjacent - if clearable, clear it; otherwise select the new tile
-      if (clearableTileIds.includes(tile.id)) {
+      if (clearableTileIdSet.has(tile.id)) {
         setSelectedTileId(null);
         handleTileClear(tile.id);
       } else {
         setSelectedTileId(tile.id);
       }
     }
-  }, [isGameOver, gamePhase, selectedTileId, tiles, clearableTileIds, handleSwap, handleTileClear, initSound]);
+  }, [isGameOver, gamePhase, selectedTileId, tiles, clearableTileIdSet, handleSwap, handleTileClear, initSound]);
 
   // ============================================
   // RENDER
@@ -1571,7 +1571,7 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
                   <>
                     <div className="text-impact text-3xl md:text-4xl text-neon-amber mb-2"
                       style={{ textShadow: '0 0 40px #ffb000' }}>
-                      TIME'S UP!
+                      TIME&apos;S UP!
                     </div>
                     {score > timedHighScore && timedHighScore > 0 ? (
                       <div className="text-lg text-yellow-400 mb-4 font-rajdhani animate-pulse">
@@ -1718,7 +1718,7 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
               ))}
             </div>
 
-            {/* Tiles - Absolutely positioned for smooth animation */}
+            {/* Tiles - Absolutely positioned with CSS transforms for 60fps */}
             <div
               className="relative"
               style={{
@@ -1726,24 +1726,22 @@ ${streak > 1 ? `🔥 ${streak} Day Streak!` : ''}`;
                 height: gridPixelSize,
               }}
             >
-              <AnimatePresence mode="popLayout">
-                {tiles.map(tile => (
-                  <Tile
-                    key={tile.id}
-                    tile={tile}
-                    onClear={handleTileClear}
-                    onSwap={handleSwap}
-                    onSelect={handleTileSelect}
-                    isClearable={clearableTileIds.includes(tile.id)}
-                    isSelected={selectedTileId === tile.id}
-                    cellSize={cellSize}
-                    gridGap={4}
-                    isNew={newTileIds.has(tile.id)}
-                    isSwapping={swappingTileIds.has(tile.id)}
-                    isHinted={hintTileIds.has(tile.id)}
-                  />
-                ))}
-              </AnimatePresence>
+              {tiles.map(tile => (
+                <Tile
+                  key={tile.id}
+                  tile={tile}
+                  onClear={handleTileClear}
+                  onSwap={handleSwap}
+                  onSelect={handleTileSelect}
+                  isClearable={clearableTileIdSet.has(tile.id)}
+                  isSelected={selectedTileId === tile.id}
+                  cellSize={cellSize}
+                  gridGap={4}
+                  isNew={newTileIds.has(tile.id)}
+                  isSwapping={swappingTileIds.has(tile.id)}
+                  isHinted={hintTileIds.has(tile.id)}
+                />
+              ))}
             </div>
 
             {/* No Moves Overlay */}
